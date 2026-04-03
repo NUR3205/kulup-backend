@@ -53,6 +53,7 @@ app.post("/login", async (req, res) => {
 });
 
 // --- KAYIT OL ---
+// --- KAYIT OL ---
 app.post("/register", async (req, res) => {
   try {
     const { full_name, email, password, role, club_email, auth_code } =
@@ -72,9 +73,8 @@ app.post("/register", async (req, res) => {
     res.json({ message: "Kayıt başarılı" });
   } catch (err) {
     console.log(err);
-    res
-      .status(500)
-      .json({ message: "Kayıt hatası veya bu T.C./Mail zaten kullanımda." });
+    // İŞTE SİHİRLİ DOKUNUŞ: Artık bize standart mesajı değil, hatanın teknik İngilizce sebebini doğrudan telefonda gösterecek!
+    res.status(500).json({ message: "GERÇEK HATA: " + err.message });
   }
 });
 
