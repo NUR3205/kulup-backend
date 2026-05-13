@@ -1,198 +1,353 @@
 const express = require("express");
 const cors = require("cors");
-const pool = require("./db"); // Neon.tech bulut veritabanı bağlantımız
-const multer = require("multer");
-const path = require("path");
+const { Pool } = require("pg");
+
 const app = express();
 
+// 1. ARA YAZILIMLAR (Büyük resimler için kapıları sonuna kadar açtık)
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(
+  express.urlencoded({ limit: "50mb", extended: true, parameterLimit: 50000 }),
+);
 
-// Uploads klasörünü dışarıya açık hale getiriyoruz
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
-// --- MULTER (FOTOĞRAF KAYDETME) AYARLARI ---
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    // Fotoğrafların isimleri çakışmasın diye sonuna tarih ekliyoruz
-    cb(null, Date.now() + path.extname(file.originalname));
-  },
+// 2. VERİTABANI BAĞLANTISI
+const pool = new Pool({
+  connectionString:
+    "postgresql://neondb_owner:npg_fNRw27gixpUt@ep-orange-water-an5acdnp-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+  ssl: { rejectUnauthorized: false },
 });
-const upload = multer({ storage: storage });
+
+// --- KAYIT OL ---
+app.post("/register", async (req, res) => {
+  try {
+    const { fullName, email, password, role, clubEmail, authCode } = req.body;
+    if (!email.endsWith("@ogr.bandirma.edu.tr")) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Sadece okul maili kullanılabilir." });
+    }
+    if (password.length !== 11) {
+      return res
+        .status(400)
+        .json({ success: false, message: "TC No 11 haneli olmalıdır." });
+    }
+    await pool.query(
+      "INSERT INTO users (name, email, password, role, club_email, auth_code) VALUES($1, $2, $3, $4, $5, $6)",
+      [
+        fullName,
+        email.toLowerCase(),
+        password,
+        role,
+        clubEmail || null,
+        authCode || null,
+      ],
+    );
+    res.json({ success: true, message: "Kayıt Başarılı" });
+  } catch (err) {
+    console.error("Kayıt Hatası:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Bu e-posta ile zaten kayıt olunmuş olabilir.",
+    });
+  }
+});
 
 // --- GİRİŞ YAP ---
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await pool.query(
-      "SELECT * FROM users WHERE email = $1 AND password = $2",
-      [email.toLowerCase(), password],
+      "SELECT users.*, clubs.club_name FROM users LEFT JOIN clubs ON users.auth_code = clubs.auth_code WHERE users.email = $1 AND users.password = $2",
+      [email, password],
     );
-    if (user.rows.length === 0)
-      return res.status(401).json({ message: "Hatalı giriş!" });
-
-    let userData = user.rows[0];
-    // login içindeki başkan kontrol kısmı:
-    if (userData.auth_code) {
-      const club = await pool.query(
-        "SELECT club_name FROM clubs WHERE auth_code = $1",
-        [userData.auth_code],
-      );
-      if (club.rows.length > 0) {
-        userData.club_name = club.rows[0].club_name;
-        userData.role = "president";
-      }
+    if (user.rows.length > 0) {
+      res.json({ user: user.rows[0] });
+    } else {
+      res.status(401).json({ message: "Hatalı mail veya TC No!" });
     }
-    res.json({ message: "Başarılı", user: userData });
   } catch (err) {
     res.status(500).json({ message: "Sunucu hatası." });
   }
 });
 
-// --- KAYIT OL ---
-// --- KAYIT OL ---
-app.post("/register", async (req, res) => {
+// --- YENİ ETKİNLİK EKLE (FRONTEND İLE %100 UYUMLU) ---
+app.post("/events", async (req, res) => {
+  console.log("--- YENİ ETKİNLİK İSTEĞİ GELDİ ---");
   try {
-    const { full_name, email, password, role, club_email, auth_code } =
-      req.body;
+    const {
+      title,
+      date,
+      club_name,
+      preview_text,
+      detailed_content,
+      image_url,
+    } = req.body;
+
+    if (!title) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Başlık verisi ulaşmadı." });
+    }
 
     await pool.query(
-      "INSERT INTO users (name, email, password, role, club_email, auth_code) VALUES($1, $2, $3, $4, $5, $6)",
-      [
-        full_name,
-        email.toLowerCase(),
-        password,
-        role,
-        club_email || null,
-        auth_code || null,
-      ],
+      "INSERT INTO events (title, date, preview_text, detailed_content, club_name, image_url) VALUES($1, $2, $3, $4, $5, $6)",
+      [title, date, preview_text, detailed_content, club_name, image_url],
     );
-    res.json({ message: "Kayıt başarılı" });
+
+    console.log("Başarılı: Etkinlik Neon'a kaydedildi!");
+    res
+      .status(200)
+      .json({ success: true, message: "Etkinlik başarıyla yayınlandı!" });
   } catch (err) {
-    console.log(err);
-    // İŞTE SİHİRLİ DOKUNUŞ: Artık bize standart mesajı değil, hatanın teknik İngilizce sebebini doğrudan telefonda gösterecek!
-    res.status(500).json({ message: "GERÇEK HATA: " + err.message });
+    console.error("Veritabanı Hatası:", err.message);
+    res
+      .status(500)
+      .json({ success: false, message: "Veritabanına kaydedilemedi." });
+  }
+});
+
+// --- TÜM ETKİNLİKLERİ ÇEK (ANA SAYFA) ---
+app.get("/events", async (req, res) => {
+  try {
+    const query = `
+      SELECT e.*, 
+      (SELECT COUNT(*) FROM event_participants ep WHERE ep.event_id = e.id) as participant_count 
+      FROM events e ORDER BY e.id DESC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Etkinlikler çekilemedi.");
+  }
+});
+
+// --- PROFİL İÇİN ETKİNLİKLER ---
+app.get("/my-events/:userId", async (req, res) => {
+  try {
+    const myEvents = await pool.query("SELECT * FROM events ORDER BY id DESC");
+    res.json(myEvents.rows);
+  } catch (err) {
+    res.status(500).json({ message: "Hata oluştu." });
+  }
+});
+
+// --- ETKİNLİK SİL ---
+app.delete("/events/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query("DELETE FROM events WHERE id = $1", [id]);
+    res.json({ success: true, message: "Etkinlik başarıyla silindi." });
+  } catch (err) {
+    console.error("Silme hatası:", err.message);
+    res.status(500).json({ error: "Silme işlemi başarısız." });
   }
 });
 
 // --- ETKİNLİĞE KATIL ---
-app.post("/join", async (req, res) => {
+app.post("/join-event", async (req, res) => {
+  const { event_id, user_id, user_name } = req.body;
   try {
-    const { user_id, event_id } = req.body;
-
-    // Çift Kayıt Kontrolü (Aynı öğrenci aynı etkinliğe 2 kez katılamaz)
     const checkUser = await pool.query(
-      "SELECT * FROM registrations WHERE user_id = $1 AND event_id = $2",
-      [user_id, event_id],
+      "SELECT * FROM event_participants WHERE event_id = $1 AND user_name = $2",
+      [event_id, user_name],
     );
-
     if (checkUser.rows.length > 0) {
-      return res
-        .status(400)
-        .json({ message: "Bu etkinliğe zaten katıldınız! 😊" });
+      return res.status(400).send("Zaten kayıtlısınız");
     }
-
     await pool.query(
-      "INSERT INTO registrations (user_id, event_id) VALUES ($1, $2)",
-      [user_id, event_id],
+      "INSERT INTO event_participants (event_id, user_id, user_name) VALUES ($1, $2, $3)",
+      [event_id, user_id, user_name],
     );
-    res.json({ message: "Başarıyla katıldınız! ✅" });
+    res.status(200).send("Katılım başarılı");
   } catch (err) {
-    res.status(500).json({ message: "Sunucu hatası." });
+    console.error(err);
+    res.status(500).send("Kayıt işlemi başarısız.");
   }
 });
 
-// --- ETKİNLİKLERİ LİSTELE ---
-app.get("/events", async (req, res) => {
+// --- ETKİNLİKTEN AYRIL ---
+app.post("/leave-event", async (req, res) => {
+  const { event_id, user_name } = req.body;
   try {
-    const allEvents = await pool.query("SELECT * FROM events ORDER BY id DESC");
-    res.json(allEvents.rows);
-  } catch (err) {
-    res.status(500).json([]);
-  }
-});
-
-// --- KATILIMCILARI LİSTELEME ---
-app.get("/event-participants/:eventId", async (req, res) => {
-  try {
-    const { eventId } = req.params;
-
-    // JOIN kullanarak kayıtlı öğrencilerin isim ve maillerini çekiyoruz
-    const participants = await pool.query(
-      `SELECT users.name, users.email 
-       FROM registrations 
-       JOIN users ON registrations.user_id = users.user_id 
-       WHERE registrations.event_id = $1`,
-      [eventId],
+    await pool.query(
+      "DELETE FROM event_participants WHERE event_id = $1 AND user_name = $2",
+      [event_id, user_name],
     );
-
-    res.json(participants.rows);
+    res.status(200).send("Ayrılma başarılı");
   } catch (err) {
-    console.error("Katılımcı Çekme Hatası:", err.message);
-    res.status(500).json([]);
+    console.error(err);
+    res.status(500).send("Ayrılma işlemi başarısız.");
   }
 });
 
-// --- KULÜP İSTATİSTİKLERİ (Toplam Katılımcı Sayısı) ---
-app.get("/club-stats/:clubName", async (req, res) => {
+// --- KULÜP KATILIMCILARINI LİSTELE ---
+
+// --- BİR ETKİNLİĞİN KATILIMCILARINI GETİR (Detay sayfası için) ---
+app.get("/event-participants/:id", async (req, res) => {
   try {
-    const { clubName } = req.params;
     const result = await pool.query(
-      "SELECT COUNT(r.id) as total FROM registrations r JOIN events e ON r.event_id = e.id WHERE e.club_name = $1",
-      [clubName],
+      "SELECT * FROM event_participants WHERE event_id = $1",
+      [req.params.id],
     );
-    res.json({ totalParticipants: result.rows[0].total || "0" });
+    res.json(result.rows);
   } catch (err) {
-    console.error("İstatistik hatası:", err.message);
-    res.status(500).json({ message: "Sunucu hatası" });
+    console.error(err);
+    res.status(500).send("Katılımcılar çekilemedi.");
   }
 });
-
-// --- ETKİNLİK EKLE (FOTOĞRAF DESTEKLİ) ---
-app.post("/add-event", upload.single("image"), async (req, res) => {
+// --- BİR KULÜBÜN TÜM ETKİNLİK KATILIMCILARINI GETİR (Katılımcı listesi sayfası için) ---
+app.get("/club-participants/:clubName", async (req, res) => {
   try {
-    const {
-      title,
-      description,
-      date,
-      club_name,
-      detailed_content,
-      preview_text,
-    } = req.body;
-
-    // Afiş URL'sini dinamik olarak oluştur (Render'da çalışması için)
-    let imageUrl = null;
-    if (req.file) {
-      const baseUrl = req.protocol + "://" + req.get("host");
-      imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
-    }
-
-    await pool.query(
-      "INSERT INTO events (title, description, date, club_name, image_url, detailed_content, preview_text) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-      [
-        title,
-        description,
-        date,
-        club_name,
-        imageUrl,
-        detailed_content,
-        preview_text,
-      ],
+    const result = await pool.query(
+      `SELECT ep.user_name, e.title as event_title 
+       FROM event_participants ep 
+       JOIN events e ON ep.event_id = e.id 
+       WHERE e.club_name = $1`,
+      [req.params.clubName],
     );
-
-    res.json({ message: "Etkinlik başarıyla yayınlandı! 🎉" });
+    res.json(result.rows);
   } catch (err) {
-    console.error("Etkinlik ekleme hatası:", err);
-    res.status(500).json({ message: "Sunucu hatası." });
+    console.error(err);
+    res.status(500).send("Kulüp katılımcıları çekilemedi.");
   }
 });
 
-// --- SUNUCUYU BAŞLAT ---
-// Render ortamı process.env.PORT kullanır, lokalde ise 5000 çalışır.
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, "0.0.0.0", () =>
-  console.log(`🚀 Sunucu ${PORT} portunda aktif!`),
+// --- ETKİNLİK DETAYI GETİR ---
+app.get("/event-details/:id", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM events WHERE id = $1", [
+      req.params.id,
+    ]);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Etkinlik detayı çekilemedi.");
+  }
+});
+
+// --- KULÜP ÜYELİĞİ DURUMUNU KONTROL ET ---
+app.get("/club-membership/:userId/:clubName", async (req, res) => {
+  try {
+    const { userId, clubName } = req.params;
+    const result = await pool.query(
+      "SELECT * FROM club_members WHERE user_id = $1 AND club_name = $2",
+      [userId, clubName],
+    );
+    res.json({ isMember: result.rows.length > 0 });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Üyelik durumu çekilemedi.");
+  }
+});
+
+// --- KULÜBE KATIL ---
+app.post("/join-club", async (req, res) => {
+  try {
+    const { user_id, club_name } = req.body;
+    await pool.query(
+      "INSERT INTO club_members (user_id, club_name) VALUES ($1, $2)",
+      [user_id, club_name],
+    );
+    res.status(200).send("Kulübe başarıyla katılındı.");
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Kulübe katılım başarısız.");
+  }
+});
+
+// --- KULÜPTEN AYRIL ---
+app.post("/leave-club", async (req, res) => {
+  try {
+    const { user_id, club_name } = req.body;
+    await pool.query(
+      "DELETE FROM club_members WHERE user_id = $1 AND club_name = $2",
+      [user_id, club_name],
+    );
+    res.status(200).send("Kulüpten ayrılındı.");
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Kulüpten ayrılma başarısız.");
+  }
+});
+
+// --- ÖĞRENCİDEN DİLEK VE ŞİKAYET AL ---
+app.post("/submit-feedback", async (req, res) => {
+  try {
+    const { user_id, user_name, club_name, message } = req.body;
+    await pool.query(
+      "INSERT INTO feedbacks (user_id, user_name, club_name, message) VALUES ($1, $2, $3, $4)",
+      [user_id, user_name, club_name, message],
+    );
+    res.status(200).send("Geri bildirim başarıyla gönderildi.");
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Hata oluştu.");
+  }
+});
+
+// --- BAŞKANA GELEN BİLDİRİMLERİ GÖNDER ---
+app.get("/club-feedbacks/:clubName", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM feedbacks WHERE club_name = $1 ORDER BY created_at DESC",
+      [req.params.clubName],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Bildirimler çekilemedi.");
+  }
+});
+
+// --- ETKİNLİĞE YILDIZ VER ---
+app.post("/rate-event", async (req, res) => {
+  try {
+    const { event_id, user_id, rating } = req.body;
+
+    // Önce bu öğrenci bu etkinliğe daha önce puan vermiş mi bakalım
+    const check = await pool.query(
+      "SELECT * FROM event_ratings WHERE event_id = $1 AND user_id = $2",
+      [event_id, user_id],
+    );
+
+    if (check.rows.length > 0) {
+      // Daha önce vermişse, eski puanını yeni verdiği yıldızla değiştir (Güncelle)
+      await pool.query(
+        "UPDATE event_ratings SET rating = $1 WHERE event_id = $2 AND user_id = $3",
+        [rating, event_id, user_id],
+      );
+    } else {
+      // İlk defa veriyorsa yeni kayıt aç
+      await pool.query(
+        "INSERT INTO event_ratings (event_id, user_id, rating) VALUES ($1, $2, $3)",
+        [event_id, user_id, rating],
+      );
+    }
+    res.status(200).send("Puan başarıyla kaydedildi.");
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Puan kaydedilirken hata oluştu.");
+  }
+});
+
+// --- ETKİNLİĞİN ORTALAMA YILDIZINI ÇEK ---
+app.get("/event-rating/:eventId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT AVG(rating) as average_rating, COUNT(rating) as total_votes FROM event_ratings WHERE event_id = $1",
+      [req.params.eventId],
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Puan çekilemedi.");
+  }
+});
+
+// SUNUCUYU BAŞLAT
+const PORT = 5000;
+app.listen(PORT, () =>
+  console.log(`🚀 Sunucu ${PORT} portunda tıkır tıkır çalışıyor...`),
 );
