@@ -385,6 +385,58 @@ app.get("/club-details/:clubName", async (req, res) => {
   }
 });
 
+// === FAVORİLERE EKLE / ÇIKAR ===
+app.post("/toggle-favorite", async (req, res) => {
+  const { user_id, event_id } = req.body;
+  try {
+    // Önce bu etkinlik zaten favorilerde var mı diye bakıyoruz
+    const check = await pool.query(
+      "SELECT * FROM favorites WHERE user_id = $1 AND event_id = $2",
+      [user_id, event_id],
+    );
+
+    if (check.rows.length > 0) {
+      // Varsa, favorilerden çıkar (Sil)
+      await pool.query(
+        "DELETE FROM favorites WHERE user_id = $1 AND event_id = $2",
+        [user_id, event_id],
+      );
+      res.json({ message: "Favorilerden çıkarıldı", isFavorite: false });
+    } else {
+      // Yoksa, favorilere ekle
+      await pool.query(
+        "INSERT INTO favorites (user_id, event_id) VALUES ($1, $2)",
+        [user_id, event_id],
+      );
+      res.json({ message: "Favorilere eklendi", isFavorite: true });
+    }
+  } catch (error) {
+    console.error("Favori işlemi hatası:", error);
+    res.status(500).send("Sunucu hatası");
+  }
+});
+
+// === KULLANICININ FAVORİ ETKİNLİKLERİNİ GETİR ===
+app.get("/favorites/:user_id", async (req, res) => {
+  const { user_id } = req.params;
+  try {
+    // JOIN işlemi ile favori tablosundaki event_id'leri alıp, etkinliklerin tüm detaylarını çekiyoruz
+    const result = await pool.query(
+      `
+            SELECT events.* FROM events 
+            JOIN favorites ON events.id = favorites.event_id 
+            WHERE favorites.user_id = $1
+            ORDER BY events.id DESC
+        `,
+      [user_id],
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Favorileri getirme hatası:", error);
+    res.status(500).send("Sunucu hatası");
+  }
+});
+
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
