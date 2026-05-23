@@ -108,18 +108,28 @@ app.post("/events", async (req, res) => {
 });
 
 // --- TÜM ETKİNLİKLERİ ÇEK (ANA SAYFA) ---
+// === YENİLENMİŞ ETKİNLİK LİSTELEME ENDPOINT'İ (PANO İÇİN) ===
+// === PANO İÇİN ETKİNLİKLERİ GETİR ===
 app.get("/events", async (req, res) => {
+  // Frontend'den gelen giriş yapmış kullanıcının ID'sini alıyoruz
+  const { user_id } = req.query;
+
   try {
-    const query = `
-      SELECT e.*, 
-      (SELECT COUNT(*) FROM event_participants ep WHERE ep.event_id = e.id) as participant_count 
-      FROM events e ORDER BY e.id DESC
-    `;
-    const result = await pool.query(query);
+    const result = await pool.query(
+      `
+            SELECT events.*, 
+                   (SELECT COUNT(*) FROM favorites WHERE event_id = events.id)::INTEGER as like_count,
+                   EXISTS(SELECT 1 FROM favorites WHERE event_id = events.id AND user_id = $1) as is_favorite
+            FROM events
+            ORDER BY events.id DESC
+        `,
+      [user_id || null],
+    );
+
     res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Etkinlikler çekilemedi.");
+  } catch (error) {
+    console.error("Etkinlik listesi çekilirken hata oluştu:", error);
+    res.status(500).send("Sunucu hatası");
   }
 });
 
