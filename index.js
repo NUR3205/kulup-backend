@@ -107,11 +107,8 @@ app.post("/events", async (req, res) => {
   }
 });
 
-// --- TÜM ETKİNLİKLERİ ÇEK (ANA SAYFA) ---
-// === YENİLENMİŞ ETKİNLİK LİSTELEME ENDPOINT'İ (PANO İÇİN) ===
 // === PANO İÇİN ETKİNLİKLERİ GETİR ===
 app.get("/events", async (req, res) => {
-  // Frontend'den gelen giriş yapmış kullanıcının ID'sini alıyoruz
   const { user_id } = req.query;
 
   try {
@@ -119,7 +116,8 @@ app.get("/events", async (req, res) => {
       `
             SELECT events.*, 
                    (SELECT COUNT(*) FROM favorites WHERE event_id = events.id)::INTEGER as like_count,
-                   EXISTS(SELECT 1 FROM favorites WHERE event_id = events.id AND user_id = $1) as is_favorite
+                   EXISTS(SELECT 1 FROM favorites WHERE event_id = events.id AND user_id = $1) as is_favorite,
+                   (SELECT COUNT(*) FROM participants WHERE event_id = events.id)::INTEGER as participant_count
             FROM events
             ORDER BY events.id DESC
         `,
