@@ -108,26 +108,25 @@ app.post("/events", async (req, res) => {
 });
 
 app.get("/events", async (req, res) => {
+  // Frontend'den gelen id'yi yakalıyoruz
   const { user_id } = req.query;
 
   try {
-    // Senin orijinal "events.*" verilerine (katılımcı sayısı dahil) dokunmuyoruz.
-    // Sadece yanlarına kalp için gereken 2 bilgiyi iliştiriyoruz.
-    const result = await pool.query(
-      `
-            SELECT events.*, 
-                   (SELECT COUNT(*) FROM favorites WHERE event_id = events.id)::INTEGER as like_count,
-                   EXISTS(SELECT 1 FROM favorites WHERE event_id = events.id AND user_id = $1) as is_favorite
-            FROM events
-            ORDER BY events.id DESC
-        `,
-      [user_id || null],
-    );
+    const query = `
+      SELECT e.*, 
+      (SELECT COUNT(*) FROM event_participants ep WHERE ep.event_id = e.id)::INTEGER as participant_count,
+      (SELECT COUNT(*) FROM favorites f WHERE f.event_id = e.id)::INTEGER as like_count,
+      EXISTS(SELECT 1 FROM favorites f2 WHERE f2.event_id = e.id AND f2.user_id = $1) as is_favorite
+      FROM events e 
+      ORDER BY e.id DESC
+    `;
 
+    // user_id'yi güvenli bir şekilde sorguya gönderiyoruz
+    const result = await pool.query(query, [user_id || null]);
     res.json(result.rows);
-  } catch (error) {
-    console.error("Etkinlik listesi çekilirken hata oluştu:", error);
-    res.status(500).send("Sunucu hatası");
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Etkinlikler çekilemedi.");
   }
 });
 
