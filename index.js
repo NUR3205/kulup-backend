@@ -444,6 +444,67 @@ app.get("/favorites/:user_id", async (req, res) => {
   }
 });
 
+// --- 1. YENİ DUYURU YAYINLAMA ENDPOINT'İ (HOCALAR İÇİN) ---
+app.post("/announcements", async (req, res) => {
+  const {
+    title,
+    content,
+    category,
+    is_important,
+    department,
+    teacher_id,
+    teacher_name,
+  } = req.body;
+
+  try {
+    const query = `
+      INSERT INTO announcements (title, content, category, is_important, department, teacher_id, teacher_name)
+      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
+    `;
+    const values = [
+      title,
+      content,
+      category,
+      is_important || false,
+      department,
+      teacher_id,
+      teacher_name,
+    ];
+    const result = await pool.query(query, values);
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("Duyuru eklenirken hata oluştu:", err);
+    res.status(500).send("Duyuru yayınlanamadı.");
+  }
+});
+
+// --- 2. DUYURULARI FİLTRELİ ÇEKME ENDPOINT'İ (ÖĞRENCİ VE HOCALAR İÇİN) ---
+app.get("/announcements", async (req, res) => {
+  const { department } = req.query;
+
+  try {
+    let query = "";
+    let values = [];
+
+    if (department) {
+      // Eğer istek atan bir öğrenciyse sadece KENDİ BÖLÜMÜNÜN duyurularını görsün
+      query =
+        "SELECT * FROM announcements WHERE department = $1 ORDER BY id DESC";
+      values = [department];
+    } else {
+      // Eğer departman gönderilmediyse (veya genel ise) tüm duyuruları getir
+      query = "SELECT * FROM announcements ORDER BY id DESC";
+    }
+
+    const result = await pool.query(query, values);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Duyurular çekilirken hata oluştu:", err);
+    res.status(500).send("Duyurular getirilemedi.");
+  }
+});
+
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
