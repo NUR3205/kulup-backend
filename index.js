@@ -107,17 +107,17 @@ app.post("/events", async (req, res) => {
   }
 });
 
-// === PANO İÇİN ETKİNLİKLERİ GETİR ===
 app.get("/events", async (req, res) => {
   const { user_id } = req.query;
 
   try {
+    // Senin orijinal "events.*" verilerine (katılımcı sayısı dahil) dokunmuyoruz.
+    // Sadece yanlarına kalp için gereken 2 bilgiyi iliştiriyoruz.
     const result = await pool.query(
       `
             SELECT events.*, 
                    (SELECT COUNT(*) FROM favorites WHERE event_id = events.id)::INTEGER as like_count,
-                   EXISTS(SELECT 1 FROM favorites WHERE event_id = events.id AND user_id = $1) as is_favorite,
-                   (SELECT COUNT(*) FROM participants WHERE event_id = events.id)::INTEGER as participant_count
+                   EXISTS(SELECT 1 FROM favorites WHERE event_id = events.id AND user_id = $1) as is_favorite
             FROM events
             ORDER BY events.id DESC
         `,
