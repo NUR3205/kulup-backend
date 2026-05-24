@@ -547,6 +547,19 @@ app.get("/announcements/:id/views", async (req, res) => {
   }
 });
 
+// --- DUYURU SİLME ENDPOINT'İ ---
+app.delete("/announcements/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Duyuruyu sil (NeonDB'de ON DELETE CASCADE ayarladığımız için görüntülenme sayıları da otomatik silinir, çok temiz!)
+    await pool.query("DELETE FROM announcements WHERE id = $1", [id]);
+    res.status(200).send("Duyuru başarıyla silindi.");
+  } catch (err) {
+    console.error("Duyuru silinirken hata:", err);
+    res.status(500).send("Sunucu hatası.");
+  }
+});
+
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
