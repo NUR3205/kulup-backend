@@ -483,29 +483,28 @@ app.post("/announcements", async (req, res) => {
   }
 });
 
-// --- 2. DUYURULARI FİLTRELİ ÇEKME ENDPOINT'İ (ÖĞRENCİ VE HOCALAR İÇİN) ---
+// --- TÜM DUYURULARI VEYA BÖLÜME GÖRE DUYURULARI ÇEKME ---
 app.get("/announcements", async (req, res) => {
-  const { department } = req.query;
+  const { department } = req.query; // Frontend'den gelen bölüm bilgisi
 
   try {
-    let query = "";
+    let query = "SELECT * FROM announcements";
     let values = [];
 
+    // Eğer frontend bir bölüm gönderdiyse, SADECE o bölümün duyurularını getir
     if (department) {
-      // Eğer istek atan bir öğrenciyse sadece KENDİ BÖLÜMÜNÜN duyurularını görsün
-      query =
-        "SELECT * FROM announcements WHERE department = $1 ORDER BY id DESC";
-      values = [department];
+      query += " WHERE department = $1 ORDER BY created_at DESC";
+      values.push(department);
     } else {
-      // Eğer departman gönderilmediyse (veya genel ise) tüm duyuruları getir
-      query = "SELECT * FROM announcements ORDER BY id DESC";
+      // Bölüm yoksa (veya admin girerse) hepsini getir
+      query += " ORDER BY created_at DESC";
     }
 
     const result = await pool.query(query, values);
-    res.json(result.rows);
+    res.status(200).json(result.rows);
   } catch (err) {
-    console.error("Duyurular çekilirken hata oluştu:", err);
-    res.status(500).send("Duyurular getirilemedi.");
+    console.error("Duyurular getirilirken hata oluştu:", err);
+    res.status(500).send("Sunucu hatası.");
   }
 });
 
