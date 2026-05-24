@@ -505,6 +505,44 @@ app.get("/announcements", async (req, res) => {
   }
 });
 
+// --- 1. DUYURU OKUNDUĞUNDA GÖRÜNTÜLENMEYİ KAYDETME ---
+app.post("/announcements/:id/view", async (req, res) => {
+  const { id } = req.params; // Duyuru ID'si
+  const { user_id, user_name } = req.body;
+
+  try {
+    // ON CONFLICT DO NOTHING ile bir öğrencinin aynı duyuruda sayacı 2 kez artırmasını engelliyoruz
+    const query = `
+      INSERT INTO announcement_views (announcement_id, user_id, user_name)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (announcement_id, user_id) DO NOTHING
+    `;
+    await pool.query(query, [id, user_id, user_name]);
+    res.status(200).send("Görüntülenme başarıyla kaydedildi.");
+  } catch (err) {
+    console.error("Görüntülenme kayıt hatası:", err);
+    res.status(500).send("Sunucu hatası.");
+  }
+});
+
+// --- 2. HOCALAR İÇİN: DUYURUYU GÖRENLERİ LİSTELEME ---
+app.get("/announcements/:id/views", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = `
+      SELECT user_name, viewed_at 
+      FROM announcement_views 
+      WHERE announcement_id = $1 
+      ORDER BY viewed_at DESC
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Görüntüleyenler çekilirken hata:", err);
+    res.status(500).send("Veriler getirilemedi.");
+  }
+});
+
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
