@@ -445,7 +445,9 @@ app.get("/favorites/:user_id", async (req, res) => {
 });
 
 // --- 1. YENİ DUYURU YAYINLAMA ENDPOINT'İ (HOCALAR İÇİN) ---
+// --- 1. YENİ DUYURU YAYINLAMA ENDPOINT'İ (DERS ADI EKLENDİ) ---
 app.post("/announcements", async (req, res) => {
+  // Frontend'den artık course_name bilgisini de alıyoruz
   const {
     title,
     content,
@@ -454,12 +456,13 @@ app.post("/announcements", async (req, res) => {
     department,
     teacher_id,
     teacher_name,
+    course_name,
   } = req.body;
 
   try {
     const query = `
-      INSERT INTO announcements (title, content, category, is_important, department, teacher_id, teacher_name)
-      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
+      INSERT INTO announcements (title, content, category, is_important, department, teacher_id, teacher_name, course_name)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
     `;
     const values = [
       title,
@@ -469,6 +472,7 @@ app.post("/announcements", async (req, res) => {
       department,
       teacher_id,
       teacher_name,
+      course_name,
     ];
     const result = await pool.query(query, values);
 
