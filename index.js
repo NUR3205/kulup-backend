@@ -18,6 +18,124 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
+const { Expo } = require("expo-server-sdk");
+const nodemailer = require("nodemailer");
+
+let expo = new Expo();
+
+// Gmail Uygulama Şifreni Buraya Girmelisin
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: "bandirmakampusapp@gmail.com",
+    pass: "a1b2c3d4e5f6g7h8",
+  },
+});
+
+// --- TOKEN KAYDETME ENDPOINT'İ ---
+app.post("/save-token", async (req, res) => {
+  const { userId, token } = req.body;
+  if (!userId || !token) return res.status(400).send("Geçersiz veri");
+
+  try {
+    const query = "UPDATE users SET expo_push_token = $1 WHERE id = $2";
+    await pool.query(query, [token, userId]);
+    res.json({
+      success: true,
+      message: "Cihaz bildirimi için Token kaydedildi.",
+    });
+  } catch (err) {
+    console.error("Token kaydetme hatası:", err);
+    res.status(500).json({ error: "Sunucu hatası" });
+  }
+});
+
+// --- DUYURU YAYINLA, BİLDİRİM VE E-POSTA GÖNDER ---
+app.post("/announcements", async (req, res) => {
+  const {
+    title,
+    content,
+    category,
+    is_important,
+    department,
+    teacher_id,
+    teacher_name,
+    course_name,
+  } = req.body;
+
+  try {
+    // 1. Duyuruyu Veritabanına Kaydet
+    const insertQuery = `
+      INSERT INTO announcements (title, content, category, is_important, department, teacher_id, teacher_name, course_name)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
+    `;
+    const result = await pool.query(insertQuery, [
+      title,
+      content,
+      category,
+      is_important || false,
+      department,
+      teacher_id,
+      teacher_name,
+      course_name,
+    ]);
+    const newAnnouncement = result.rows[0];
+
+    // 2. Rolü 'student' olanları bul
+    const studentQuery =
+      "SELECT email, expo_push_token FROM users WHERE role = 'student'";
+    const { rows: students } = await pool.query(studentQuery);
+    const studentEmails = students.map((u) => u.email).filter(Boolean);
+
+    // 3. E-posta Gönderimi
+    if (studentEmails.length > 0) {
+      const mailOptions = {
+        from: '"Kampüs Etkinlik Sistemi" <senin.projemailin@gmail.com>',
+        to: studentEmails.join(","),
+        subject: `📢 ${department} - Yeni Duyuru: ${title}`,
+        text: `Sayın Öğrencimiz,\n\n${teacher_name} hocamız yeni bir duyuru yayınladı:\n\n"${content}"\n\nDetaylar için uygulamanızı kontrol edebilirsiniz.`,
+      };
+      transporter
+        .sendMail(mailOptions)
+        .catch((err) => console.error("Mail Gönderim Hatası:", err));
+    }
+
+    // 4. Anlık Bildirim (Push Notification) Gönderimi
+    let messages = [];
+    for (let student of students) {
+      if (
+        student.expo_push_token &&
+        Expo.isExpoPushToken(student.expo_push_token)
+      ) {
+        messages.push({
+          to: student.expo_push_token,
+          sound: "default",
+          title: `📢 ${teacher_name} Yeni Duyuru Yayınladı!`,
+          body: title,
+          data: { route: "home" },
+        });
+      }
+    }
+
+    if (messages.length > 0) {
+      let chunks = expo.chunkPushNotifications(messages);
+      (async () => {
+        for (let chunk of chunks) {
+          try {
+            await expo.sendPushNotificationsAsync(chunk);
+          } catch (error) {
+            console.error("Expo Push Hatası:", error);
+          }
+        }
+      })();
+    }
+
+    res.status(201).json(newAnnouncement);
+  } catch (err) {
+    console.error("Duyuru eklenirken kritik hata:", err);
+    res.status(500).send("Duyuru yayınlanamadı.");
+  }
+});
 // --- KAYIT OL ---
 app.post("/register", async (req, res) => {
   try {
