@@ -24,16 +24,17 @@ const nodemailer = require("nodemailer");
 let expo = new Expo();
 
 // 1. Sunucu Mail Ayarları (IPv4 zorunlu kılındı ve Host doğrudan verildi)
+
+// 1. Sunucu Mail Ayarları (Render kısıtlamasını aşmak için Port 587)
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
+  port: 587,
+  secure: false, // 587 portu için false olmalı (STARTTLS kullanır)
   auth: {
     user: "bandirmakampusapp@gmail.com",
-    pass: "a1b2c3d4e5f6g7h8", // Şifreni tekrar girmeyi unutma
+    pass: "a1b2c3d4e5f6g7h8", // Şifreni tekrar yazmayı unutma
   },
 });
-
 // --- TOKEN KAYDETME ENDPOINT'İ ---
 app.post("/save-token", async (req, res) => {
   const { userId, token } = req.body;
