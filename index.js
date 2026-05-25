@@ -23,12 +23,14 @@ const nodemailer = require("nodemailer");
 
 let expo = new Expo();
 
-// Gmail Uygulama Şifreni Buraya Girmelisin
+// 1. Sunucu Mail Ayarları (IPv4 zorunlu kılındı ve Host doğrudan verildi)
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
   auth: {
     user: "bandirmakampusapp@gmail.com",
-    pass: "a1b2c3d4e5f6g7h8",
+    pass: "a1b2c3d4e5f6g7h8", // Şifreni tekrar girmeyi unutma
   },
 });
 
