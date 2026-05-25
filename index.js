@@ -90,7 +90,7 @@ app.post("/announcements", async (req, res) => {
     // 3. E-posta Gönderimi
     if (studentEmails.length > 0) {
       const mailOptions = {
-        from: '"Kampüs Etkinlik Sistemi" <senin.projemailin@gmail.com>',
+        from: '"Kampüs Etkinlik Sistemi" <bandirmakampusapp@gmail.coms>',
         to: studentEmails.join(","),
         subject: `📢 ${department} - Yeni Duyuru: ${title}`,
         text: `Sayın Öğrencimiz,\n\n${teacher_name} hocamız yeni bir duyuru yayınladı:\n\n"${content}"\n\nDetaylar için uygulamanızı kontrol edebilirsiniz.`,
