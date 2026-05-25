@@ -18,10 +18,12 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
+// Eski nodemailer kodlarını sildik, modern API'ye geçtik
+const { Resend } = require("resend");
 const { Expo } = require("expo-server-sdk");
-const nodemailer = require("nodemailer");
 
 let expo = new Expo();
+const resend = new Resend("re_gSj9Ksj9_Nr1GTC8X8t3be5mZm4J2LQ5j"); // Ekranda kopyaladığın API Key'i buraya koydum
 
 // 1. Sunucu Mail Ayarları (IPv4 zorunlu kılındı ve Host doğrudan verildi)
 
@@ -85,22 +87,30 @@ app.post("/announcements", async (req, res) => {
     const newAnnouncement = result.rows[0];
 
     // 2. Rolü 'student' olanları bul
+    // --- ÖĞRENCİLERİ BUL VE E-POSTA AT (RESEND HTTP API) ---
     const studentQuery =
       "SELECT email, expo_push_token FROM users WHERE role = 'student'";
     const { rows: students } = await pool.query(studentQuery);
     const studentEmails = students.map((u) => u.email).filter(Boolean);
 
-    // 3. E-posta Gönderimi
     if (studentEmails.length > 0) {
-      const mailOptions = {
-        from: '"Kampüs Etkinlik Sistemi" <bandirmakampusapp@gmail.coms>',
-        to: studentEmails.join(","),
-        subject: `📢 ${department} - Yeni Duyuru: ${title}`,
-        text: `Sayın Öğrencimiz,\n\n${teacher_name} hocamız yeni bir duyuru yayınladı:\n\n"${content}"\n\nDetaylar için uygulamanızı kontrol edebilirsiniz.`,
-      };
-      transporter
-        .sendMail(mailOptions)
-        .catch((err) => console.error("Mail Gönderim Hatası:", err));
+      resend.emails
+        .send({
+          from: "Kampüs Sistemi <onboarding@resend.dev>", // Resend'in varsayılan test gönderici adresi
+          to: studentEmails,
+          subject: `📢 ${department} - Yeni Duyuru: ${title}`,
+          html: `
+          <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+            <h2 style="color: #0984e3;">Sayın Öğrencimiz,</h2>
+            <p><strong>${teacher_name}</strong> hocamız yeni bir akademik duyuru yayınladı:</p>
+            <blockquote style="background: #f9f9f9; padding: 15px; border-left: 4px solid #0984e3; font-style: italic;">
+              "${content}"
+            </blockquote>
+            <p style="font-size: 12px; color: #777; margin-top: 20px;">Detaylar için uygulamanıza giriş yapabilirsiniz.</p>
+          </div>
+        `,
+        })
+        .catch((err) => console.error("Resend Mail Hatası:", err));
     }
 
     // 4. Anlık Bildirim (Push Notification) Gönderimi
