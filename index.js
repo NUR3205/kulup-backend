@@ -23,7 +23,10 @@ const { Resend } = require("resend");
 const { Expo } = require("expo-server-sdk");
 
 let expo = new Expo();
-const resend = new Resend("re_gSj9Ksj9_Nr1GTC8X8t3be5mZm4J2LQ5j"); // Ekranda kopyaladığın API Key'i buraya koydum
+// Eski hali: const resend = new Resend('re_gSj9...');
+
+// YENİ HALİ (Şifre gizlendi!):
+const resend = new Resend(process.env.RESEND_API_KEY); // Ekranda kopyaladığın API Key'i buraya koydum
 
 // 1. Sunucu Mail Ayarları (IPv4 zorunlu kılındı ve Host doğrudan verildi)
 
