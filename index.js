@@ -1,10 +1,11 @@
 const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
+const { Expo } = require("expo-server-sdk");
 
 const app = express();
 
-// 1. ARA YAZILIMLAR (Büyük resimler için kapıları sonuna kadar açtık)
+// 1. ARA YAZILIMLAR
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(
@@ -18,19 +19,8 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// Eski nodemailer kodlarını sildik, modern API'ye geçtik
-const { Resend } = require("resend");
-const { Expo } = require("expo-server-sdk");
-
+// 3. EXPO BİLDİRİM KURULUMU
 let expo = new Expo();
-// Eski hali: const resend = new Resend('re_gSj9...');
-
-// YENİ HALİ (Şifre gizlendi!):
-const resend = new Resend(process.env.RESEND_API_KEY); // Ekranda kopyaladığın API Key'i buraya koydum
-
-// 1. Sunucu Mail Ayarları (IPv4 zorunlu kılındı ve Host doğrudan verildi)
-
-// 1. Sunucu Mail Ayarları (Render kısıtlamasını aşmak için Port 587)
 
 // --- TOKEN KAYDETME ENDPOINT'İ ---
 app.post("/save-token", async (req, res) => {
@@ -50,7 +40,7 @@ app.post("/save-token", async (req, res) => {
   }
 });
 
-// --- DUYURU YAYINLA, BİLDİRİM VE E-POSTA GÖNDER ---
+// --- DUYURU YAYINLA, BİLDİRİM VE GERÇEK E-POSTA GÖNDER (BREVO API) ---
 app.post("/announcements", async (req, res) => {
   const {
     title,
@@ -60,7 +50,7 @@ app.post("/announcements", async (req, res) => {
     department,
     teacher_id,
     teacher_name,
-    course_name,
+    course_name, // Ders adı da başarıyla alınıyor
   } = req.body;
 
   try {
@@ -81,37 +71,49 @@ app.post("/announcements", async (req, res) => {
     ]);
     const newAnnouncement = result.rows[0];
 
-    // 2. Rolü 'student' olanları bul
-    // --- ÖĞRENCİLERİ BUL VE E-POSTA AT (RESEND HTTP API) ---
-    // --- ÖĞRENCİLERİ BUL VE E-POSTA AT (RESEND HTTP API) ---
+    // 2. Rolü 'student' olanları ve cihaz token'larını bul
     const studentQuery =
       "SELECT email, expo_push_token FROM users WHERE role = 'student'";
     const { rows: students } = await pool.query(studentQuery);
 
-    // Veritabanındaki mailleri çektik (Bunu jüriye göstermek için kodda bırakıyoruz)
+    // Veritabanındaki gerçek öğrenci maillerini listele (@ogr.bandirma.edu.tr)
     const studentEmails = students.map((u) => u.email).filter(Boolean);
 
+    // 3. BREVO HTTP API İLE GERÇEK E-POSTA GÖNDERİMİ
     if (studentEmails.length > 0) {
-      resend.emails
-        .send({
-          from: "Kampüs Sistemi <onboarding@resend.dev>",
+      // Brevo formatına uygun hale getiriyoruz
+      const toAddresses = studentEmails.map((email) => ({ email: email }));
 
-          // SUNUM JOKERİ: Resend ücretsiz plan kısıtlamasını aşmak için maili kendi kutumuza yönlendiriyoruz.
-          to: ["serifenuraslan705@gmail.com"], // Kendi tam Gmail adresini buraya yaz
-
+      fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "api-key": process.env.BREVO_API_KEY, // Şifreyi Render'ın kasasından güvenle çektik
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          sender: {
+            name: "Kampüs Etkinlik Sistemi",
+            email: "bandirmakampusapp@gmail.com",
+          },
+          to: toAddresses, // Gerçek öğrenci maillerine gider
           subject: `📢 ${department} - Yeni Duyuru: ${title}`,
-          html: `
-          <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-            <h2 style="color: #0984e3;">Sayın Öğrencimiz,</h2>
-            <p><strong>${teacher_name}</strong> hocamız yeni bir akademik duyuru yayınladı:</p>
-            <blockquote style="background: #f9f9f9; padding: 15px; border-left: 4px solid #0984e3; font-style: italic;">
-              "${content}"
-            </blockquote>
-            <p style="font-size: 12px; color: #777; margin-top: 20px;">Detaylar için uygulamanıza giriş yapabilirsiniz.</p>
-          </div>
-        `,
-        })
-        .catch((err) => console.error("Resend Mail Hatası:", err));
+          htmlContent: `
+            <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+              <h2 style="color: #0984e3;">Sayın Öğrencimiz,</h2>
+              <p><strong>${teacher_name}</strong> hocamız yeni bir akademik duyuru yayınladı:</p>
+              <blockquote style="background: #f9f9f9; padding: 15px; border-left: 4px solid #0984e3; font-style: italic;">
+                "${content}"
+              </blockquote>
+              <p style="font-size: 12px; color: #777; margin-top: 20px;">Detaylar için uygulamanıza giriş yapabilirsiniz.</p>
+            </div>
+          `,
+        }),
+      })
+        .then((response) =>
+          console.log("Brevo ile Gerçek Mailler Başarıyla Fırlatıldı!"),
+        )
+        .catch((err) => console.error("Brevo Mail Hatası:", err));
     }
 
     // 4. Anlık Bildirim (Push Notification) Gönderimi
@@ -150,6 +152,7 @@ app.post("/announcements", async (req, res) => {
     res.status(500).send("Duyuru yayınlanamadı.");
   }
 });
+
 // --- KAYIT OL ---
 app.post("/register", async (req, res) => {
   try {
@@ -203,7 +206,7 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// --- YENİ ETKİNLİK EKLE (FRONTEND İLE %100 UYUMLU) ---
+// --- YENİ ETKİNLİK EKLE ---
 app.post("/events", async (req, res) => {
   console.log("--- YENİ ETKİNLİK İSTEĞİ GELDİ ---");
   try {
@@ -239,10 +242,9 @@ app.post("/events", async (req, res) => {
   }
 });
 
+// --- TÜM ETKİNLİKLERİ ÇEK ---
 app.get("/events", async (req, res) => {
-  // Frontend'den gelen id'yi yakalıyoruz
   const { user_id } = req.query;
-
   try {
     const query = `
       SELECT e.*, 
@@ -252,8 +254,6 @@ app.get("/events", async (req, res) => {
       FROM events e 
       ORDER BY e.id DESC
     `;
-
-    // user_id'yi güvenli bir şekilde sorguya gönderiyoruz
     const result = await pool.query(query, [user_id || null]);
     res.json(result.rows);
   } catch (err) {
@@ -321,9 +321,7 @@ app.post("/leave-event", async (req, res) => {
   }
 });
 
-// --- KULÜP KATILIMCILARINI LİSTELE ---
-
-// --- BİR ETKİNLİĞİN KATILIMCILARINI GETİR (Detay sayfası için) ---
+// --- BİR ETKİNLİĞİN KATILIMCILARINI GETİR ---
 app.get("/event-participants/:id", async (req, res) => {
   try {
     const result = await pool.query(
@@ -336,7 +334,8 @@ app.get("/event-participants/:id", async (req, res) => {
     res.status(500).send("Katılımcılar çekilemedi.");
   }
 });
-// --- BİR KULÜBÜN TÜM ETKİNLİK KATILIMCILARINI GETİR (Katılımcı listesi sayfası için) ---
+
+// --- BİR KULÜBÜN TÜM ETKİNLİK KATILIMCILARINI GETİR ---
 app.get("/club-participants/:clubName", async (req, res) => {
   try {
     const result = await pool.query(
@@ -366,7 +365,7 @@ app.get("/event-details/:id", async (req, res) => {
   }
 });
 
-// --- KULÜP DETAYLARINI GETİR (Instagram ve Mail İçin) ---
+// --- KULÜP DETAYLARINI GETİR ---
 app.get("/club-details/:clubName", async (req, res) => {
   try {
     const { clubName } = req.params;
@@ -374,7 +373,6 @@ app.get("/club-details/:clubName", async (req, res) => {
       "SELECT * FROM clubs WHERE club_name = $1",
       [clubName],
     );
-
     if (result.rows.length > 0) {
       res.json(result.rows[0]);
     } else {
@@ -382,7 +380,7 @@ app.get("/club-details/:clubName", async (req, res) => {
     }
   } catch (err) {
     console.error(err);
-    res.status(500).send("Kulüp bilgileri çekilemedi.");
+    res.status(500).send("Sunucu hatası.");
   }
 });
 
@@ -464,21 +462,17 @@ app.get("/club-feedbacks/:clubName", async (req, res) => {
 app.post("/rate-event", async (req, res) => {
   try {
     const { event_id, user_id, rating } = req.body;
-
-    // Önce bu öğrenci bu etkinliğe daha önce puan vermiş mi bakalım
     const check = await pool.query(
       "SELECT * FROM event_ratings WHERE event_id = $1 AND user_id = $2",
       [event_id, user_id],
     );
 
     if (check.rows.length > 0) {
-      // Daha önce vermişse, eski puanını yeni verdiği yıldızla değiştir (Güncelle)
       await pool.query(
         "UPDATE event_ratings SET rating = $1 WHERE event_id = $2 AND user_id = $3",
         [rating, event_id, user_id],
       );
     } else {
-      // İlk defa veriyorsa yeni kayıt aç
       await pool.query(
         "INSERT INTO event_ratings (event_id, user_id, rating) VALUES ($1, $2, $3)",
         [event_id, user_id, rating],
@@ -505,44 +499,22 @@ app.get("/event-rating/:eventId", async (req, res) => {
   }
 });
 
-// --- KULÜP DETAYLARINI GETİR ---
-app.get("/club-details/:clubName", async (req, res) => {
-  try {
-    const { clubName } = req.params;
-    const result = await pool.query(
-      "SELECT * FROM clubs WHERE club_name = $1",
-      [clubName],
-    );
-    if (result.rows.length > 0) {
-      res.json(result.rows[0]);
-    } else {
-      res.status(404).json({ message: "Kulüp bulunamadı." });
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Sunucu hatası.");
-  }
-});
-
 // === FAVORİLERE EKLE / ÇIKAR ===
 app.post("/toggle-favorite", async (req, res) => {
   const { user_id, event_id } = req.body;
   try {
-    // Önce bu etkinlik zaten favorilerde var mı diye bakıyoruz
     const check = await pool.query(
       "SELECT * FROM favorites WHERE user_id = $1 AND event_id = $2",
       [user_id, event_id],
     );
 
     if (check.rows.length > 0) {
-      // Varsa, favorilerden çıkar (Sil)
       await pool.query(
         "DELETE FROM favorites WHERE user_id = $1 AND event_id = $2",
         [user_id, event_id],
       );
       res.json({ message: "Favorilerden çıkarıldı", isFavorite: false });
     } else {
-      // Yoksa, favorilere ekle
       await pool.query(
         "INSERT INTO favorites (user_id, event_id) VALUES ($1, $2)",
         [user_id, event_id],
@@ -559,7 +531,6 @@ app.post("/toggle-favorite", async (req, res) => {
 app.get("/favorites/:user_id", async (req, res) => {
   const { user_id } = req.params;
   try {
-    // JOIN işlemi ile favori tablosundaki event_id'leri alıp, etkinliklerin tüm detaylarını çekiyoruz
     const result = await pool.query(
       `
             SELECT events.* FROM events 
@@ -576,59 +547,18 @@ app.get("/favorites/:user_id", async (req, res) => {
   }
 });
 
-// --- 1. YENİ DUYURU YAYINLAMA ENDPOINT'İ (HOCALAR İÇİN) ---
-// --- 1. YENİ DUYURU YAYINLAMA ENDPOINT'İ (DERS ADI EKLENDİ) ---
-app.post("/announcements", async (req, res) => {
-  // Frontend'den artık course_name bilgisini de alıyoruz
-  const {
-    title,
-    content,
-    category,
-    is_important,
-    department,
-    teacher_id,
-    teacher_name,
-    course_name,
-  } = req.body;
-
-  try {
-    const query = `
-      INSERT INTO announcements (title, content, category, is_important, department, teacher_id, teacher_name, course_name)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
-    `;
-    const values = [
-      title,
-      content,
-      category,
-      is_important || false,
-      department,
-      teacher_id,
-      teacher_name,
-      course_name,
-    ];
-    const result = await pool.query(query, values);
-
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error("Duyuru eklenirken hata oluştu:", err);
-    res.status(500).send("Duyuru yayınlanamadı.");
-  }
-});
-
 // --- TÜM DUYURULARI VEYA BÖLÜME GÖRE DUYURULARI ÇEKME ---
 app.get("/announcements", async (req, res) => {
-  const { department } = req.query; // Frontend'den gelen bölüm bilgisi
+  const { department } = req.query;
 
   try {
     let query = "SELECT * FROM announcements";
     let values = [];
 
-    // Eğer frontend bir bölüm gönderdiyse, SADECE o bölümün duyurularını getir
     if (department) {
       query += " WHERE department = $1 ORDER BY created_at DESC";
       values.push(department);
     } else {
-      // Bölüm yoksa (veya admin girerse) hepsini getir
       query += " ORDER BY created_at DESC";
     }
 
@@ -642,11 +572,10 @@ app.get("/announcements", async (req, res) => {
 
 // --- 1. DUYURU OKUNDUĞUNDA GÖRÜNTÜLENMEYİ KAYDETME ---
 app.post("/announcements/:id/view", async (req, res) => {
-  const { id } = req.params; // Duyuru ID'si
+  const { id } = req.params;
   const { user_id, user_name } = req.body;
 
   try {
-    // ON CONFLICT DO NOTHING ile bir öğrencinin aynı duyuruda sayacı 2 kez artırmasını engelliyoruz
     const query = `
       INSERT INTO announcement_views (announcement_id, user_id, user_name)
       VALUES ($1, $2, $3)
@@ -682,7 +611,6 @@ app.get("/announcements/:id/views", async (req, res) => {
 app.delete("/announcements/:id", async (req, res) => {
   const { id } = req.params;
   try {
-    // Duyuruyu sil (NeonDB'de ON DELETE CASCADE ayarladığımız için görüntülenme sayıları da otomatik silinir, çok temiz!)
     await pool.query("DELETE FROM announcements WHERE id = $1", [id]);
     res.status(200).send("Duyuru başarıyla silindi.");
   } catch (err) {
