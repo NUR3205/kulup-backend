@@ -155,36 +155,44 @@ app.post("/announcements", async (req, res) => {
 
 // --- KAYIT OL ---
 app.post("/register", async (req, res) => {
+  // 1. Frontend'den gelen paketi açıyoruz.
+  // DİKKAT: Frontend'de "fullName" ve "department" gönderdiğin için burada da isim uyuşmalı!
+  const { fullName, email, password, role, clubEmail, authCode, department } =
+    req.body;
+
   try {
-    const { fullName, email, password, role, clubEmail, authCode } = req.body;
-    if (!email.endsWith("@ogr.bandirma.edu.tr")) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Sadece okul maili kullanılabilir." });
-    }
-    if (password.length !== 11) {
-      return res
-        .status(400)
-        .json({ success: false, message: "TC No 11 haneli olmalıdır." });
-    }
-    await pool.query(
-      "INSERT INTO users (name, email, password, role, club_email, auth_code) VALUES($1, $2, $3, $4, $5, $6)",
-      [
-        fullName,
-        email.toLowerCase(),
-        password,
-        role,
-        clubEmail || null,
-        authCode || null,
-      ],
+    // 2. Kullanıcının zaten kayıtlı olup olmadığını e-posta ile kontrol edelim
+    const userExists = await pool.query(
+      "SELECT * FROM users WHERE email = $1",
+      [email],
     );
-    res.json({ success: true, message: "Kayıt Başarılı" });
-  } catch (err) {
-    console.error("Kayıt Hatası:", err.message);
-    res.status(500).json({
-      success: false,
-      message: "Bu e-posta ile zaten kayıt olunmuş olabilir.",
+    if (userExists.rows.length > 0) {
+      return res
+        .status(400)
+        .json({ message: "Bu e-posta adresiyle zaten bir hesap mevcut." });
+    }
+
+    // 3. Kulüp Başkanı rolü seçildiyse authCode veya ekstra doğrulamaları burada yapabilirsin
+    // (Gerekliyse buraya kendi özel kod kontrol mantığını yerleştirebilirsin)
+
+    // 4. SQL Sorgusu - Verileri NeonDB'ye yazma aşaması
+    // Tablondaki kolon sıralamasına ve isim uyuşmazlığına çok dikkat etmeliyiz.
+    // Sorguda "department" kolonunu tam olarak 7. sıraya yerleştirdim ($7).
+    const newUser = await pool.query(
+      "INSERT INTO users (name, email, password, role, club_email, auth_code, department) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+      [fullName, email, password, role, clubEmail, authCode, department],
+    );
+
+    // 5. Başarılı sonucu frontend'e geri fırlatıyoruz
+    res.status(200).json({
+      message: "Kayıt başarıyla tamamlandı.",
+      user: newUser.rows[0],
     });
+  } catch (err) {
+    console.error("🚨 BACKEND KAYIT HATASI:", err.message);
+    res
+      .status(500)
+      .json({ message: "Sunucu hatası meydana geldi: " + err.message });
   }
 });
 
