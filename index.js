@@ -71,15 +71,16 @@ app.post("/announcements", async (req, res) => {
     ]);
     const newAnnouncement = result.rows[0];
 
-    // 2. Rolü 'student' olanları ve cihaz token'larını bul
+    // 2. DÜZELTİLDİ: Sadece hocanın bölümündeki öğrencileri ve cihaz token'larını bul
+    // "AND department = $1" şartı sayesinde diğer bölümlerdeki öğrenciler hariç tutulur.
     const studentQuery =
-      "SELECT email, expo_push_token FROM users WHERE role = 'student'";
-    const { rows: students } = await pool.query(studentQuery);
+      "SELECT email, expo_push_token FROM users WHERE role = 'student' AND department = $1";
+    const { rows: students } = await pool.query(studentQuery, [department]);
 
     // Veritabanındaki gerçek öğrenci maillerini listele (@ogr.bandirma.edu.tr)
     const studentEmails = students.map((u) => u.email).filter(Boolean);
 
-    // 3. BREVO HTTP API İLE GERÇEK E-POSTA GÖNDERİMİ
+    // 3. BREVO HTTP API İLE GERÇEK E-POSTA GÖNDERİMİ (Artık sadece filtreli maillere gider)
     if (studentEmails.length > 0) {
       // Brevo formatına uygun hale getiriyoruz
       const toAddresses = studentEmails.map((email) => ({ email: email }));
@@ -96,7 +97,7 @@ app.post("/announcements", async (req, res) => {
             name: "Kampüs Etkinlik Sistemi",
             email: "bandirmakampusapp@gmail.com",
           },
-          to: toAddresses, // Gerçek öğrenci maillerine gider
+          to: toAddresses, // Gerçek ve KENDİ BÖLÜMÜNDEKİ öğrenci maillerine gider
           subject: `📢 ${department} - Yeni Duyuru: ${title}`,
           htmlContent: `
             <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
@@ -111,12 +112,14 @@ app.post("/announcements", async (req, res) => {
         }),
       })
         .then((response) =>
-          console.log("Brevo ile Gerçek Mailler Başarıyla Fırlatıldı!"),
+          console.log(
+            `Brevo ile ${department} öğrencilerine mailler başarıyla fırlatıldı!`,
+          ),
         )
         .catch((err) => console.error("Brevo Mail Hatası:", err));
     }
 
-    // 4. Anlık Bildirim (Push Notification) Gönderimi
+    // 4. Anlık Bildirim (Push Notification) Gönderimi (Artık sadece o bölüme gider)
     let messages = [];
     for (let student of students) {
       if (
