@@ -218,6 +218,7 @@ app.post("/login", async (req, res) => {
 });
 
 // === KULÜP KODUNU (AUTH_CODE) SIFIRLAMA API'Sİ ===
+// === KULÜP KODUNU (AUTH_CODE) SIFIRLAMA API'Sİ (TEST MODU) ===
 app.post("/forgot-club-code", async (req, res) => {
   const { email } = req.body;
 
@@ -248,7 +249,7 @@ app.post("/forgot-club-code", async (req, res) => {
       email,
     ]);
 
-    // 4. Brevo ile Kulübün (veya kullanıcının) mail adresine yeni kodu gönder
+    // 4. Brevo ile Kulübün mail adresine (ŞU ANLIK TEST İÇİN SENİN MAİLİNE) yeni kodu gönder
     fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
@@ -261,7 +262,8 @@ app.post("/forgot-club-code", async (req, res) => {
           name: "Kampüs Etkinlik Sistemi",
           email: "bandirmakampusapp@gmail.com",
         },
-        to: [{ email: user.club_email || user.email }], // Kulübün mailine gönderilir
+        // DİKKAT: Burayı test için sadece sana gelecek şekilde sabitledik!
+        to: [{ email: "serifenuraslan705@gmail.com" }],
         subject: `🔐 Kulüp Kodunuz Sıfırlandı!`,
         htmlContent: `
           <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
@@ -270,7 +272,7 @@ app.post("/forgot-club-code", async (req, res) => {
             <div style="background: #f1f2f6; padding: 15px; margin: 20px 0; border-radius: 10px; text-align: center; font-size: 28px; font-weight: bold; color: #2d3436; letter-spacing: 5px;">
               ${newAuthCode}
             </div>
-            <p style="font-size: 13px; color: #777;">Eğer bu işlemi siz yapmadıysanız lütfen bu e-postayı dikkate almayın.</p>
+            <p style="font-size: 13px; color: #777;">Bu bir test mailidir. Gerçek sistemde bu mail sadece kulübün resmi adresine gidecektir.</p>
           </div>
         `,
       }),
