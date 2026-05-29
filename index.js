@@ -230,14 +230,28 @@ app.post("/forgot-club-code", async (req, res) => {
     );
 
     if (userResult.rows.length === 0) {
-      return res
-        .status(404)
-        .json({
-          message:
-            "Bu e-posta adresine ait bir kulüp başkanı hesabı bulunamadı.",
-        });
+      return res.status(404).json({
+        message: "Bu e-posta adresine ait bir kulüp başkanı hesabı bulunamadı.",
+      });
     }
 
+    // === KULLANICININ KENDİ BELİRLEDİĞİ YENİ KULÜP KODUNU KAYDETME API'Sİ ===
+    app.post("/update-club-code", async (req, res) => {
+      const { email, newCode } = req.body;
+
+      try {
+        await pool.query(
+          "UPDATE users SET auth_code = $1 WHERE email = $2 AND role = 'president'",
+          [newCode, email],
+        );
+        res
+          .status(200)
+          .json({ message: "Kulüp kodunuz başarıyla güncellendi!" });
+      } catch (err) {
+        console.error("Yeni kod kaydetme hatası:", err);
+        res.status(500).json({ message: "Sunucu hatası meydana geldi." });
+      }
+    });
     const user = userResult.rows[0];
 
     // 2. Rastgele yeni bir 6 haneli kod üret (Örn: 593284)
@@ -279,12 +293,10 @@ app.post("/forgot-club-code", async (req, res) => {
     });
 
     // 5. Başarı mesajı döndür
-    res
-      .status(200)
-      .json({
-        message: "Yeni kod e-posta adresinize gönderildi.",
-        newCode: newAuthCode,
-      });
+    res.status(200).json({
+      message: "Yeni kod e-posta adresinize gönderildi.",
+      newCode: newAuthCode,
+    });
   } catch (err) {
     console.error("Şifre sıfırlama hatası:", err);
     res.status(500).json({ message: "Sunucu hatası meydana geldi." });
