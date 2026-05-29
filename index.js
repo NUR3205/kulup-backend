@@ -217,6 +217,78 @@ app.post("/login", async (req, res) => {
   }
 });
 
+// === KULÜP KODUNU (AUTH_CODE) SIFIRLAMA API'Sİ ===
+app.post("/forgot-club-code", async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    // 1. Kullanıcıyı bul
+    const userResult = await pool.query(
+      "SELECT * FROM users WHERE email = $1 AND role = 'president'",
+      [email],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res
+        .status(404)
+        .json({
+          message:
+            "Bu e-posta adresine ait bir kulüp başkanı hesabı bulunamadı.",
+        });
+    }
+
+    const user = userResult.rows[0];
+
+    // 2. Rastgele yeni bir 6 haneli kod üret (Örn: 593284)
+    const newAuthCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // 3. Veritabanında bu yeni şifreyi güncelle
+    await pool.query("UPDATE users SET auth_code = $1 WHERE email = $2", [
+      newAuthCode,
+      email,
+    ]);
+
+    // 4. Brevo ile Kulübün (veya kullanıcının) mail adresine yeni kodu gönder
+    fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "api-key": process.env.BREVO_API_KEY,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        sender: {
+          name: "Kampüs Etkinlik Sistemi",
+          email: "bandirmakampusapp@gmail.com",
+        },
+        to: [{ email: user.club_email || user.email }], // Kulübün mailine gönderilir
+        subject: `🔐 Kulüp Kodunuz Sıfırlandı!`,
+        htmlContent: `
+          <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+            <h2 style="color: #0984e3;">Merhaba Sayın Başkan,</h2>
+            <p><strong>${user.club_name}</strong> paneline giriş yapabilmeniz için yeni güvenlik kodunuz aşağıdadır:</p>
+            <div style="background: #f1f2f6; padding: 15px; margin: 20px 0; border-radius: 10px; text-align: center; font-size: 28px; font-weight: bold; color: #2d3436; letter-spacing: 5px;">
+              ${newAuthCode}
+            </div>
+            <p style="font-size: 13px; color: #777;">Eğer bu işlemi siz yapmadıysanız lütfen bu e-postayı dikkate almayın.</p>
+          </div>
+        `,
+      }),
+    });
+
+    // 5. Başarı mesajı döndür
+    res
+      .status(200)
+      .json({
+        message: "Yeni kod e-posta adresinize gönderildi.",
+        newCode: newAuthCode,
+      });
+  } catch (err) {
+    console.error("Şifre sıfırlama hatası:", err);
+    res.status(500).json({ message: "Sunucu hatası meydana geldi." });
+  }
+});
+
 // --- YENİ ETKİNLİK EKLE ---
 app.post("/events", async (req, res) => {
   console.log("--- YENİ ETKİNLİK İSTEĞİ GELDİ ---");
