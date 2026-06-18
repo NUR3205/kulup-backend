@@ -716,6 +716,27 @@ app.delete("/announcements/:id", async (req, res) => {
   }
 });
 
+// Öğrencinin bölümüne göre Hocalara atanmış dersleri getiren API ucu
+app.get("/courses", async (req, res) => {
+  const { department } = req.query;
+
+  try {
+    // 'users' tablosundan ilgili bölümün derslerini çekiyoruz.
+    // DISTINCT: Aynı dersi veren iki hoca varsa listeye tek ders olarak düşsün diye.
+    // IS NOT NULL: Öğrencilerin boş (NULL) ders alanları menüye "Boş" diye gelmesin diye.
+    const result = await pool.query(
+      "SELECT DISTINCT course_name FROM users WHERE department = $1 AND course_name IS NOT NULL",
+      [department],
+    );
+
+    // Çekilen gerçek dersleri frontend'e yolluyoruz
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Dersler çekilirken hata oluştu:", error);
+    res.status(500).json({ error: "Sunucu hatası" });
+  }
+});
+
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
