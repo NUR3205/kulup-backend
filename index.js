@@ -782,6 +782,54 @@ app.get("/event-participants/:id", async (req, res) => {
   }
 });
 
+// 📌 1. DUYURU KAYDETME / ÇIKARMA API'Sİ
+app.post("/toggle-saved-announcement", async (req, res) => {
+  const { user_id, announcement_id } = req.body;
+  try {
+    const check = await pool.query(
+      "SELECT * FROM saved_announcements WHERE user_id = $1 AND announcement_id = $2",
+      [user_id, announcement_id],
+    );
+
+    if (check.rows.length > 0) {
+      // Zaten ekliyse çıkar (Arşivden sil)
+      await pool.query(
+        "DELETE FROM saved_announcements WHERE user_id = $1 AND announcement_id = $2",
+        [user_id, announcement_id],
+      );
+      res.json({ status: "removed" });
+    } else {
+      // Ekli değilse arşive ekle
+      await pool.query(
+        "INSERT INTO saved_announcements (user_id, announcement_id) VALUES ($1, $2)",
+        [user_id, announcement_id],
+      );
+      res.json({ status: "added" });
+    }
+  } catch (error) {
+    console.error("Duyuru kaydetme hatası:", error);
+    res.status(500).json({ error: "Sunucu hatası" });
+  }
+});
+
+// 📌 2. ÖĞRENCİNİN KAYDETTİĞİ DUYURULARI GETİRME API'Sİ
+app.get("/saved-announcements/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    // JOIN ile sadece bu öğrencinin kaydettiği duyuruları filtreler
+    const result = await pool.query(
+      `SELECT a.* FROM announcements a 
+       JOIN saved_announcements sa ON a.id = sa.announcement_id 
+       WHERE sa.user_id = $1`,
+      [userId],
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Kaydedilen duyurular çekilirken hata:", error);
+    res.status(500).json({ error: "Sunucu hatası" });
+  }
+});
+
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
