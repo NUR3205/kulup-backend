@@ -418,17 +418,33 @@ app.post("/leave-event", async (req, res) => {
   }
 });
 
-// --- BİR ETKİNLİĞİN KATILIMCILARINI GETİR ---
-app.get("/event-participants/:id", async (req, res) => {
+// Benzersiz (Unique) katılımcı sayısını getiren API ucu
+app.get("/unique-participants", async (req, res) => {
+  const { club_name } = req.query;
+
   try {
-    const result = await pool.query(
-      "SELECT * FROM event_participants WHERE event_id = $1",
-      [req.params.id],
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Katılımcılar çekilemedi.");
+    let result;
+
+    if (club_name) {
+      // BAŞKAN İÇİN: Sadece kendi kulübünün etkinliklerine katılan benzersiz kişiler
+      result = await pool.query(
+        `SELECT COUNT(DISTINCT ep.user_id) 
+         FROM event_participants ep 
+         JOIN events e ON ep.event_id = e.id 
+         WHERE e.club_name = $1`,
+        [club_name],
+      );
+    } else {
+      // ÖĞRENCİ İÇİN: Kampüsteki tüm etkinliklere katılan toplam benzersiz kişiler
+      result = await pool.query(
+        "SELECT COUNT(DISTINCT user_id) FROM event_participants",
+      );
+    }
+
+    res.json({ totalUnique: parseInt(result.rows[0].count) });
+  } catch (error) {
+    console.error("Benzersiz katılımcı hatası:", error);
+    res.status(500).json({ error: "Sunucu hatası" });
   }
 });
 
