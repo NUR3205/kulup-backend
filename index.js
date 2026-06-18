@@ -359,13 +359,23 @@ app.get("/events", async (req, res) => {
   }
 });
 
-// --- PROFİL İÇİN ETKİNLİKLER ---
+// ÖĞRENCİNİN SADECE KAYDOLDUĞU ETKİNLİKLERİ GETİREN API UCU
 app.get("/my-events/:userId", async (req, res) => {
+  const { userId } = req.params;
+
   try {
-    const myEvents = await pool.query("SELECT * FROM events ORDER BY id DESC");
-    res.json(myEvents.rows);
-  } catch (err) {
-    res.status(500).json({ message: "Hata oluştu." });
+    // JOIN komutu ile sadece bilet alınan etkinlikler filtrelenir!
+    const result = await pool.query(
+      `SELECT e.* FROM events e 
+       JOIN event_participants ep ON e.id = ep.event_id 
+       WHERE ep.user_id = $1`,
+      [userId],
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Katıldığım etkinlikler çekilirken hata:", error);
+    res.status(500).json({ error: "Sunucu hatası" });
   }
 });
 
