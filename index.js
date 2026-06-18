@@ -753,6 +753,25 @@ app.get("/courses", async (req, res) => {
   }
 });
 
+// ETKİNLİK DETAYINDAKİ KATILIMCI LİSTESİNİ VE BUTONU DÜZELTEN API UCU
+app.get("/event-participants/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // İlgili etkinliğe katılanları event_participants tablosundan çekiyoruz
+    const result = await pool.query(
+      "SELECT user_id, user_name FROM event_participants WHERE event_id = $1",
+      [id],
+    );
+
+    // DİKKAT: Burası çok önemli! result.rows yollamazsak frontend çöker veya boş liste sanır.
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Katılımcılar çekilirken hata:", error);
+    res.status(500).json({ error: "Sunucu hatası" });
+  }
+});
+
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
