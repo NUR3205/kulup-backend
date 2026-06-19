@@ -868,6 +868,20 @@ app.get("/teacher-students", async (req, res) => {
     res.status(500).send("Veritabanı hatası: " + err.message);
   }
 });
+
+// --- ÖĞRENCİNİN KENDİ MESAJLARINI VE GELEN CEVAPLARI GÖRMESİ ---
+app.get("/student-feedbacks/:userId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM feedbacks WHERE user_id = $1 ORDER BY created_at DESC",
+      [req.params.userId],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Öğrenci mesajları çekilirken hata:", err);
+    res.status(500).send("Mesajlar çekilemedi.");
+  }
+});
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
