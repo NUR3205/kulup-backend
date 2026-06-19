@@ -579,7 +579,7 @@ app.post("/submit-feedback", async (req, res) => {
   }
 });
 
-// --- HOCANIN / BAŞKANIN ÖĞRENCİYE CEVAP YAZMASI ---
+// --- HOCANIN / BAŞKANIN ÖĞRENCİYE CEVAP YAZMASI VE BİLDİRİM GÖNDERMESİ ---
 app.post("/reply-feedback", async (req, res) => {
   const { feedback_id, teacher_message } = req.body;
 
@@ -588,14 +588,10 @@ app.post("/reply-feedback", async (req, res) => {
   }
 
   try {
-    // 1. GÜVENLİK ADIMI: Tabloda teacher_reply adında bir sütun var mı kontrol et, yoksa anında yarat!
-    // Uygulama çökmesini engeller
-    await pool.query(`
-      ALTER TABLE feedbacks 
-      ADD COLUMN IF NOT EXISTS teacher_reply TEXT;
-    `);
+    await pool.query(
+      `ALTER TABLE feedbacks ADD COLUMN IF NOT EXISTS teacher_reply TEXT;`,
+    );
 
-    // 2. Cevabı veritabanına kaydet (Güncelle)
     const updateQuery = `
       UPDATE feedbacks 
       SET teacher_reply = $1 
@@ -609,6 +605,47 @@ app.post("/reply-feedback", async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(404).send("Bu mesaja ulaşılamadı.");
+    }
+
+    const updatedFeedback = result.rows[0];
+
+    // 🌟 YENİ: ÖĞRENCİYE ANLIK BİLDİRİM (PUSH NOTIFICATION) FIRLATMA 🌟
+    if (updatedFeedback.user_id) {
+      try {
+        // Öğrencinin cihaz token'ını bul
+        const userRes = await pool.query(
+          "SELECT expo_push_token FROM users WHERE id::text = $1::text",
+          [updatedFeedback.user_id],
+        );
+
+        if (userRes.rows.length > 0 && userRes.rows[0].expo_push_token) {
+          const token = userRes.rows[0].expo_push_token;
+
+          if (Expo.isExpoPushToken(token)) {
+            // Hoca mı cevap verdi başkan mı, onu ayırt et
+            const senderName = updatedFeedback.club_name.startsWith("TEACHER_")
+              ? "Bölüm Hocanız"
+              : "Kulüp Başkanı";
+
+            // Expo ile telefonu titret!
+            await expo.sendPushNotificationsAsync([
+              {
+                to: token,
+                sound: "default",
+                title: `💬 ${senderName} Mesajına Cevap Verdi!`,
+                body:
+                  teacher_message.length > 50
+                    ? teacher_message.substring(0, 50) + "..."
+                    : teacher_message,
+                data: { route: "feedback" },
+              },
+            ]);
+            console.log("✅ Öğrenciye cevap bildirimi başarıyla fırlatıldı!");
+          }
+        }
+      } catch (pushErr) {
+        console.error("🚨 Bildirim gönderim hatası:", pushErr);
+      }
     }
 
     res
@@ -904,11 +941,12 @@ app.get("/teacher-students", async (req, res) => {
   }
 });
 
-// --- ÖĞRENCİNİN KENDİ MESAJLARINI VE GELEN CEVAPLARI GÖRMESİ ---
+// --- ÖĞRENCİNİN KENDİ MESAJLARINI VE GELEN CEVAPLARI GÖRMESİ (ZIRHLI) ---
 app.get("/student-feedbacks/:userId", async (req, res) => {
   try {
+    // Tip uyuşmazlığını engellemek için ::text eklendi
     const result = await pool.query(
-      "SELECT * FROM feedbacks WHERE user_id = $1 ORDER BY created_at DESC",
+      "SELECT * FROM feedbacks WHERE user_id::text = $1::text ORDER BY created_at DESC",
       [req.params.userId],
     );
     res.json(result.rows);
