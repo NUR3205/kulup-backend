@@ -932,14 +932,15 @@ app.get("/club-member-count/:clubName", async (req, res) => {
   }
 });
 
-// --- KULÜBÜN KAYITLI ÜYELERİNİ GETİR ---
+// --- KULÜBÜN KAYITLI ÜYELERİNİ GETİR (ZIRHLI SÜRÜM) ---
 app.get("/club-members-list/:clubName", async (req, res) => {
   try {
-    // Kulüp üyeleri (club_members) tablosu ile kullanıcılar (users) tablosunu birleştirip isimleri çekiyoruz
+    // ::text komutu ile id'lerin her iki tabloda da metin olarak eşleşmesini garanti altına alıyoruz.
+    // Bu sayede tip uyuşmazlığından (String vs Integer) kaynaklanan çökmeler engellenir.
     const query = `
       SELECT u.id, u.name, u.email 
       FROM club_members cm 
-      JOIN users u ON cm.user_id = u.id 
+      JOIN users u ON cm.user_id::text = u.id::text 
       WHERE cm.club_name = $1 
       ORDER BY u.name ASC
     `;
@@ -947,7 +948,7 @@ app.get("/club-members-list/:clubName", async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error("Kulüp üyeleri çekilemedi:", err);
-    res.status(500).send("Sunucu hatası.");
+    res.status(500).json({ error: "Sunucu hatası: " + err.message });
   }
 });
 // SUNUCUYU BAŞLAT
