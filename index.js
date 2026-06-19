@@ -917,6 +917,20 @@ app.get("/student-feedbacks/:userId", async (req, res) => {
     res.status(500).send("Mesajlar çekilemedi.");
   }
 });
+
+// --- KULÜBÜN GERÇEK ÜYE SAYISINI GETİR ---
+app.get("/club-member-count/:clubName", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT COUNT(*) as total_members FROM club_members WHERE club_name = $1",
+      [req.params.clubName],
+    );
+    res.json({ total: parseInt(result.rows[0].total_members) });
+  } catch (err) {
+    console.error("Üye sayısı çekilemedi:", err);
+    res.status(500).send("Sunucu hatası.");
+  }
+});
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
