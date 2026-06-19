@@ -931,6 +931,25 @@ app.get("/club-member-count/:clubName", async (req, res) => {
     res.status(500).send("Sunucu hatası.");
   }
 });
+
+// --- KULÜBÜN KAYITLI ÜYELERİNİ GETİR ---
+app.get("/club-members-list/:clubName", async (req, res) => {
+  try {
+    // Kulüp üyeleri (club_members) tablosu ile kullanıcılar (users) tablosunu birleştirip isimleri çekiyoruz
+    const query = `
+      SELECT u.id, u.name, u.email 
+      FROM club_members cm 
+      JOIN users u ON cm.user_id = u.id 
+      WHERE cm.club_name = $1 
+      ORDER BY u.name ASC
+    `;
+    const result = await pool.query(query, [req.params.clubName]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Kulüp üyeleri çekilemedi:", err);
+    res.status(500).send("Sunucu hatası.");
+  }
+});
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
