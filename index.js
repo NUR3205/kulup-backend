@@ -932,16 +932,19 @@ app.get("/club-member-count/:clubName", async (req, res) => {
   }
 });
 
-// --- KULÜBÜN KAYITLI ÜYELERİNİ GETİR (ZIRHLI SÜRÜM) ---
+// --- KULÜBÜN KAYITLI ÜYELERİNİ GETİR (ZIRHLI SÜRÜM 2) ---
 app.get("/club-members-list/:clubName", async (req, res) => {
   try {
-    // ::text komutu ile id'lerin her iki tabloda da metin olarak eşleşmesini garanti altına alıyoruz.
-    // Bu sayede tip uyuşmazlığından (String vs Integer) kaynaklanan çökmeler engellenir.
+    // LEFT JOIN: users tablosundan öğrenci silinmiş olsa bile cm tablosundaki kaydı getirir.
+    // COALESCE: Eğer öğrenci silinmişse null dönmesi yerine 'Bilinmeyen Kullanıcı' yazar.
     const query = `
-      SELECT u.id, u.name, u.email 
+      SELECT 
+        cm.user_id, 
+        COALESCE(u.name, 'Silinmiş Kullanıcı (ID: ' || cm.user_id || ')') as name, 
+        COALESCE(u.email, 'E-posta bulunamadı') as email 
       FROM club_members cm 
-      JOIN users u ON cm.user_id::text = u.id::text 
-      WHERE cm.club_name = $1 
+      LEFT JOIN users u ON cm.user_id = u.id 
+      WHERE TRIM(LOWER(cm.club_name)) = TRIM(LOWER($1))
       ORDER BY u.name ASC
     `;
     const result = await pool.query(query, [req.params.clubName]);
