@@ -50,7 +50,7 @@ app.post("/announcements", async (req, res) => {
     department,
     teacher_id,
     teacher_name,
-    course_name, // Ders adı da başarıyla alınıyor
+    course_name,
   } = req.body;
 
   try {
@@ -71,25 +71,23 @@ app.post("/announcements", async (req, res) => {
     ]);
     const newAnnouncement = result.rows[0];
 
-    // 2. DÜZELTİLDİ: Sadece hocanın bölümündeki öğrencileri ve cihaz token'larını bul
-    // "AND department = $1" şartı sayesinde diğer bölümlerdeki öğrenciler hariç tutulur.
+    // 2. Sadece hocanın bölümündeki öğrencileri ve cihaz token'larını bul
     const studentQuery =
       "SELECT email, expo_push_token FROM users WHERE role = 'student' AND department = $1";
     const { rows: students } = await pool.query(studentQuery, [department]);
 
-    // Veritabanındaki gerçek öğrenci maillerini listele (@ogr.bandirma.edu.tr)
+    // Veritabanındaki gerçek öğrenci maillerini listele
     const studentEmails = students.map((u) => u.email).filter(Boolean);
 
-    // 3. BREVO HTTP API İLE GERÇEK E-POSTA GÖNDERİMİ (Artık sadece filtreli maillere gider)
+    // 3. BREVO HTTP API İLE GERÇEK E-POSTA GÖNDERİMİ
     if (studentEmails.length > 0) {
-      // Brevo formatına uygun hale getiriyoruz
       const toAddresses = studentEmails.map((email) => ({ email: email }));
 
       fetch("https://api.brevo.com/v3/smtp/email", {
         method: "POST",
         headers: {
           accept: "application/json",
-          "api-key": process.env.BREVO_API_KEY, // Şifreyi Render'ın kasasından güvenle çektik
+          "api-key": process.env.BREVO_API_KEY,
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -97,7 +95,7 @@ app.post("/announcements", async (req, res) => {
             name: "Kampüs Etkinlik Sistemi",
             email: "bandirmakampusapp@gmail.com",
           },
-          to: toAddresses, // Gerçek ve KENDİ BÖLÜMÜNDEKİ öğrenci maillerine gider
+          to: toAddresses,
           subject: `📢 ${department} - Yeni Duyuru: ${title}`,
           htmlContent: `
             <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
@@ -119,7 +117,7 @@ app.post("/announcements", async (req, res) => {
         .catch((err) => console.error("Brevo Mail Hatası:", err));
     }
 
-    // 4. Anlık Bildirim (Push Notification) Gönderimi (Artık sadece o bölüme gider)
+    // 4. Anlık Bildirim (Push Notification) Gönderimi
     let messages = [];
     for (let student of students) {
       if (
@@ -158,13 +156,10 @@ app.post("/announcements", async (req, res) => {
 
 // --- KAYIT OL ---
 app.post("/register", async (req, res) => {
-  // 1. Frontend'den gelen paketi açıyoruz.
-  // DİKKAT: Frontend'de "fullName" ve "department" gönderdiğin için burada da isim uyuşmalı!
   const { fullName, email, password, role, clubEmail, authCode, department } =
     req.body;
 
   try {
-    // 2. Kullanıcının zaten kayıtlı olup olmadığını e-posta ile kontrol edelim
     const userExists = await pool.query(
       "SELECT * FROM users WHERE email = $1",
       [email],
@@ -175,18 +170,11 @@ app.post("/register", async (req, res) => {
         .json({ message: "Bu e-posta adresiyle zaten bir hesap mevcut." });
     }
 
-    // 3. Kulüp Başkanı rolü seçildiyse authCode veya ekstra doğrulamaları burada yapabilirsin
-    // (Gerekliyse buraya kendi özel kod kontrol mantığını yerleştirebilirsin)
-
-    // 4. SQL Sorgusu - Verileri NeonDB'ye yazma aşaması
-    // Tablondaki kolon sıralamasına ve isim uyuşmazlığına çok dikkat etmeliyiz.
-    // Sorguda "department" kolonunu tam olarak 7. sıraya yerleştirdim ($7).
     const newUser = await pool.query(
       "INSERT INTO users (name, email, password, role, club_email, auth_code, department) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
       [fullName, email, password, role, clubEmail, authCode, department],
     );
 
-    // 5. Başarılı sonucu frontend'e geri fırlatıyoruz
     res.status(200).json({
       message: "Kayıt başarıyla tamamlandı.",
       user: newUser.rows[0],
@@ -217,13 +205,11 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// === KULÜP KODUNU (AUTH_CODE) SIFIRLAMA API'Sİ ===
 // === KULÜP KODUNU (AUTH_CODE) SIFIRLAMA API'Sİ (TEST MODU) ===
 app.post("/forgot-club-code", async (req, res) => {
   const { email } = req.body;
 
   try {
-    // 1. Kullanıcıyı bul
     const userResult = await pool.query(
       "SELECT * FROM users WHERE email = $1 AND role = 'president'",
       [email],
@@ -235,35 +221,14 @@ app.post("/forgot-club-code", async (req, res) => {
       });
     }
 
-    // === KULLANICININ KENDİ BELİRLEDİĞİ YENİ KULÜP KODUNU KAYDETME API'Sİ ===
-    app.post("/update-club-code", async (req, res) => {
-      const { email, newCode } = req.body;
-
-      try {
-        await pool.query(
-          "UPDATE users SET auth_code = $1 WHERE email = $2 AND role = 'president'",
-          [newCode, email],
-        );
-        res
-          .status(200)
-          .json({ message: "Kulüp kodunuz başarıyla güncellendi!" });
-      } catch (err) {
-        console.error("Yeni kod kaydetme hatası:", err);
-        res.status(500).json({ message: "Sunucu hatası meydana geldi." });
-      }
-    });
     const user = userResult.rows[0];
-
-    // 2. Rastgele yeni bir 6 haneli kod üret (Örn: 593284)
     const newAuthCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 3. Veritabanında bu yeni şifreyi güncelle
     await pool.query("UPDATE users SET auth_code = $1 WHERE email = $2", [
       newAuthCode,
       email,
     ]);
 
-    // 4. Brevo ile Kulübün mail adresine (ŞU ANLIK TEST İÇİN SENİN MAİLİNE) yeni kodu gönder
     fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
@@ -276,7 +241,6 @@ app.post("/forgot-club-code", async (req, res) => {
           name: "Kampüs Etkinlik Sistemi",
           email: "bandirmakampusapp@gmail.com",
         },
-        // DİKKAT: Burayı test için sadece sana gelecek şekilde sabitledik!
         to: [{ email: "serifenuraslan705@gmail.com" }],
         subject: `🔐 Kulüp Kodunuz Sıfırlandı!`,
         htmlContent: `
@@ -292,13 +256,28 @@ app.post("/forgot-club-code", async (req, res) => {
       }),
     });
 
-    // 5. Başarı mesajı döndür
     res.status(200).json({
       message: "Yeni kod e-posta adresinize gönderildi.",
       newCode: newAuthCode,
     });
   } catch (err) {
     console.error("Şifre sıfırlama hatası:", err);
+    res.status(500).json({ message: "Sunucu hatası meydana geldi." });
+  }
+});
+
+// === KULLANICININ KENDİ BELİRLEDİĞİ YENİ KULÜP KODUNU KAYDETME API'Sİ ===
+app.post("/update-club-code", async (req, res) => {
+  const { email, newCode } = req.body;
+
+  try {
+    await pool.query(
+      "UPDATE users SET auth_code = $1 WHERE email = $2 AND role = 'president'",
+      [newCode, email],
+    );
+    res.status(200).json({ message: "Kulüp kodunuz başarıyla güncellendi!" });
+  } catch (err) {
+    console.error("Yeni kod kaydetme hatası:", err);
     res.status(500).json({ message: "Sunucu hatası meydana geldi." });
   }
 });
@@ -364,7 +343,6 @@ app.get("/my-events/:userId", async (req, res) => {
   const { userId } = req.params;
 
   try {
-    // JOIN komutu ile sadece bilet alınan etkinlikler filtrelenir!
     const result = await pool.query(
       `SELECT e.* FROM events e 
        JOIN event_participants ep ON e.id = ep.event_id 
@@ -436,22 +414,21 @@ app.get("/unique-participants", async (req, res) => {
     let result;
 
     if (club_name) {
-      // BAŞKAN İÇİN: Sadece kendi kulübünün etkinliklerine katılan benzersiz kişiler
       result = await pool.query(
-        `SELECT COUNT(DISTINCT ep.user_id) 
+        `SELECT COUNT(DISTINCT ep.user_id) AS total_count
          FROM event_participants ep 
          JOIN events e ON ep.event_id = e.id 
          WHERE e.club_name = $1`,
         [club_name],
       );
     } else {
-      // ÖĞRENCİ İÇİN: Kampüsteki tüm etkinliklere katılan toplam benzersiz kişiler
       result = await pool.query(
-        "SELECT COUNT(DISTINCT user_id) FROM event_participants",
+        "SELECT COUNT(DISTINCT user_id) AS total_count FROM event_participants",
       );
     }
 
-    res.json({ totalUnique: parseInt(result.rows[0].count) });
+    const totalUnique = parseInt(result.rows[0].total_count) || 0;
+    res.json({ totalUnique });
   } catch (error) {
     console.error("Benzersiz katılımcı hatası:", error);
     res.status(500).json({ error: "Sunucu hatası" });
@@ -747,15 +724,10 @@ app.get("/courses", async (req, res) => {
   const { department } = req.query;
 
   try {
-    // 'users' tablosundan ilgili bölümün derslerini çekiyoruz.
-    // DISTINCT: Aynı dersi veren iki hoca varsa listeye tek ders olarak düşsün diye.
-    // IS NOT NULL: Öğrencilerin boş (NULL) ders alanları menüye "Boş" diye gelmesin diye.
     const result = await pool.query(
       "SELECT DISTINCT course_name FROM users WHERE department = $1 AND course_name IS NOT NULL",
       [department],
     );
-
-    // Çekilen gerçek dersleri frontend'e yolluyoruz
     res.json(result.rows);
   } catch (error) {
     console.error("Dersler çekilirken hata oluştu:", error);
@@ -768,13 +740,10 @@ app.get("/event-participants/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
-    // İlgili etkinliğe katılanları event_participants tablosundan çekiyoruz
     const result = await pool.query(
       "SELECT user_id, user_name FROM event_participants WHERE event_id = $1",
       [id],
     );
-
-    // DİKKAT: Burası çok önemli! result.rows yollamazsak frontend çöker veya boş liste sanır.
     res.json(result.rows);
   } catch (error) {
     console.error("Katılımcılar çekilirken hata:", error);
@@ -792,14 +761,12 @@ app.post("/toggle-saved-announcement", async (req, res) => {
     );
 
     if (check.rows.length > 0) {
-      // Zaten ekliyse çıkar (Arşivden sil)
       await pool.query(
         "DELETE FROM saved_announcements WHERE user_id = $1 AND announcement_id = $2",
         [user_id, announcement_id],
       );
       res.json({ status: "removed" });
     } else {
-      // Ekli değilse arşive ekle
       await pool.query(
         "INSERT INTO saved_announcements (user_id, announcement_id) VALUES ($1, $2)",
         [user_id, announcement_id],
@@ -816,7 +783,6 @@ app.post("/toggle-saved-announcement", async (req, res) => {
 app.get("/saved-announcements/:userId", async (req, res) => {
   const { userId } = req.params;
   try {
-    // JOIN ile sadece bu öğrencinin kaydettiği duyuruları filtreler
     const result = await pool.query(
       `SELECT a.* FROM announcements a 
        JOIN saved_announcements sa ON a.id = sa.announcement_id 
@@ -827,6 +793,32 @@ app.get("/saved-announcements/:userId", async (req, res) => {
   } catch (error) {
     console.error("Kaydedilen duyurular çekilirken hata:", error);
     res.status(500).json({ error: "Sunucu hatası" });
+  }
+});
+
+// --- HOCALAR İÇİN: KENDİ BÖLÜMÜNDEKİ ÖĞRENCİLERİ GETİR ---
+app.get("/teacher-students", async (req, res) => {
+  const { department } = req.query;
+
+  if (!department) {
+    return res.status(400).json({ error: "Bölüm bilgisi eksik" });
+  }
+
+  try {
+    // Sadece rolü 'student' olan ve hocayla aynı bölümde okuyanları çekiyoruz
+    const query = `
+      SELECT id, name, email, created_at 
+      FROM users 
+      WHERE role = 'student' AND department = $1 
+      ORDER BY name ASC
+    `;
+    const result = await pool.query(query, [department]);
+
+    // Öğrenci listesini frontend'e fırlat
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error("Öğrenci listesi çekilirken hata:", err);
+    res.status(500).json({ error: "Sunucu hatası." });
   }
 });
 
