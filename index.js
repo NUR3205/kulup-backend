@@ -809,9 +809,9 @@ app.get("/teacher-students", async (req, res) => {
   }
 
   try {
-    // TRIM ve LOWER sayesinde harf büyüklükleri ve sağdaki-soldaki gizli boşluklar eşleşmeyi bozamaz
+    // DÜZELTME: created_at sütunu silindi, sadece var olan sütunlar çekiliyor
     const query = `
-      SELECT id, name, email, department, created_at 
+      SELECT id, name, email, department 
       FROM users 
       WHERE role = 'student' AND TRIM(LOWER(department)) = TRIM(LOWER($1))
       ORDER BY name ASC
@@ -827,7 +827,6 @@ app.get("/teacher-students", async (req, res) => {
     res.status(500).send("Veritabanı hatası: " + err.message);
   }
 });
-
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
