@@ -544,6 +544,47 @@ app.post("/submit-feedback", async (req, res) => {
   }
 });
 
+// --- HOCANIN / BAŞKANIN ÖĞRENCİYE CEVAP YAZMASI ---
+app.post("/reply-feedback", async (req, res) => {
+  const { feedback_id, teacher_message } = req.body;
+
+  if (!feedback_id || !teacher_message) {
+    return res.status(400).send("Geçersiz veri");
+  }
+
+  try {
+    // 1. GÜVENLİK ADIMI: Tabloda teacher_reply adında bir sütun var mı kontrol et, yoksa anında yarat!
+    // Uygulama çökmesini engeller
+    await pool.query(`
+      ALTER TABLE feedbacks 
+      ADD COLUMN IF NOT EXISTS teacher_reply TEXT;
+    `);
+
+    // 2. Cevabı veritabanına kaydet (Güncelle)
+    const updateQuery = `
+      UPDATE feedbacks 
+      SET teacher_reply = $1 
+      WHERE id = $2 
+      RETURNING *;
+    `;
+    const result = await pool.query(updateQuery, [
+      teacher_message,
+      feedback_id,
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).send("Bu mesaja ulaşılamadı.");
+    }
+
+    res
+      .status(200)
+      .json({ success: true, message: "Cevabınız başarıyla iletildi." });
+  } catch (err) {
+    console.error("Cevap yazılırken hata:", err);
+    res.status(500).send("Sunucu hatası.");
+  }
+});
+
 // --- BAŞKANA GELEN BİLDİRİMLERİ GÖNDER ---
 app.get("/club-feedbacks/:clubName", async (req, res) => {
   try {
