@@ -796,29 +796,35 @@ app.get("/saved-announcements/:userId", async (req, res) => {
   }
 });
 
-// --- HOCALAR İÇİN: KENDİ BÖLÜMÜNDEKİ ÖĞRENCİLERİ GETİR ---
+// --- HOCALAR İÇİN: KENDİ BÖLÜMÜNDEKİ ÖĞRENCİLERİ GETİR (ZIRHLI SÜRÜM) ---
 app.get("/teacher-students", async (req, res) => {
   const { department } = req.query;
 
-  if (!department) {
-    return res.status(400).json({ error: "Bölüm bilgisi eksik" });
+  console.log("--- ÖĞRENCİ LİSTESİ İSTEĞİ GELDİ ---");
+  console.log("Gelen Bölüm Parametresi:", department);
+
+  if (!department || department === "undefined") {
+    console.log("🚨 Hata: Bölüm bilgisi boş veya geçersiz geldi!");
+    return res.status(400).send("Hocanın bölüm bilgisi sunucuya ulaşmadı.");
   }
 
   try {
-    // Sadece rolü 'student' olan ve hocayla aynı bölümde okuyanları çekiyoruz
+    // TRIM ve LOWER sayesinde harf büyüklükleri ve sağdaki-soldaki gizli boşluklar eşleşmeyi bozamaz
     const query = `
-      SELECT id, name, email, created_at 
+      SELECT id, name, email, department, created_at 
       FROM users 
-      WHERE role = 'student' AND department = $1 
+      WHERE role = 'student' AND TRIM(LOWER(department)) = TRIM(LOWER($1))
       ORDER BY name ASC
     `;
-    const result = await pool.query(query, [department]);
+    const result = await pool.query(query, [department.trim()]);
 
-    // Öğrenci listesini frontend'e fırlat
+    console.log(
+      `✅ Başarılı: (${department}) bölümü için ${result.rows.length} öğrenci bulundu.`,
+    );
     res.status(200).json(result.rows);
   } catch (err) {
-    console.error("Öğrenci listesi çekilirken hata:", err);
-    res.status(500).json({ error: "Sunucu hatası." });
+    console.error("🚨 Veritabanı Sorgu Hatası:", err.message);
+    res.status(500).send("Veritabanı hatası: " + err.message);
   }
 });
 
