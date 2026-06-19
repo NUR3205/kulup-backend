@@ -932,18 +932,17 @@ app.get("/club-member-count/:clubName", async (req, res) => {
   }
 });
 
-// --- KULÜBÜN KAYITLI ÜYELERİNİ GETİR (ZIRHLI SÜRÜM 2) ---
+// --- KULÜBÜN KAYITLI ÜYELERİNİ GETİR (SÜTUN ADI DÜZELTİLDİ) ---
 app.get("/club-members-list/:clubName", async (req, res) => {
   try {
-    // LEFT JOIN: users tablosundan öğrenci silinmiş olsa bile cm tablosundaki kaydı getirir.
-    // COALESCE: Eğer öğrenci silinmişse null dönmesi yerine 'Bilinmeyen Kullanıcı' yazar.
+    // DİKKAT: u.id yerine u.user_id kullanıldı çünkü veritabanındaki sütun adı bu!
     const query = `
       SELECT 
         cm.user_id, 
         COALESCE(u.name, 'Silinmiş Kullanıcı (ID: ' || cm.user_id || ')') as name, 
         COALESCE(u.email, 'E-posta bulunamadı') as email 
       FROM club_members cm 
-      LEFT JOIN users u ON cm.user_id = u.id 
+      LEFT JOIN users u ON cm.user_id::text = u.user_id::text 
       WHERE TRIM(LOWER(cm.club_name)) = TRIM(LOWER($1))
       ORDER BY u.name ASC
     `;
