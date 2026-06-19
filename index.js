@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
 const { Expo } = require("expo-server-sdk");
-
+const cron = require("node-cron");
 const app = express();
 
 // 1. ARA YAZILIMLAR
@@ -282,7 +282,10 @@ app.post("/update-club-code", async (req, res) => {
   }
 });
 
-// --- YENİ ETKİNLİK EKLE ---
+// En üste diğer require'ların yanına bunu eklemeyi unutma:
+// const cron = require("node-cron");
+
+// --- YENİ ETKİNLİK EKLE (OTOMATİK SİLİNME TARİHİ İLE) ---
 app.post("/events", async (req, res) => {
   console.log("--- YENİ ETKİNLİK İSTEĞİ GELDİ ---");
   try {
@@ -293,6 +296,7 @@ app.post("/events", async (req, res) => {
       preview_text,
       detailed_content,
       image_url,
+      real_date, // Frontenden gelen gerçek zaman damgası
     } = req.body;
 
     if (!title) {
@@ -301,9 +305,23 @@ app.post("/events", async (req, res) => {
         .json({ success: false, message: "Başlık verisi ulaşmadı." });
     }
 
+    // 1. GÜVENLİK: Tabloda real_date sütunu yoksa anında oluşturur (Çökmeyi engeller)
     await pool.query(
-      "INSERT INTO events (title, date, preview_text, detailed_content, club_name, image_url) VALUES($1, $2, $3, $4, $5, $6)",
-      [title, date, preview_text, detailed_content, club_name, image_url],
+      `ALTER TABLE events ADD COLUMN IF NOT EXISTS real_date TIMESTAMP;`,
+    );
+
+    // 2. Veriyi gerçek tarihiyle birlikte kaydet
+    await pool.query(
+      "INSERT INTO events (title, date, preview_text, detailed_content, club_name, image_url, real_date) VALUES($1, $2, $3, $4, $5, $6, $7)",
+      [
+        title,
+        date,
+        preview_text,
+        detailed_content,
+        club_name,
+        image_url,
+        real_date,
+      ],
     );
 
     console.log("Başarılı: Etkinlik Neon'a kaydedildi!");
@@ -315,6 +333,23 @@ app.post("/events", async (req, res) => {
     res
       .status(500)
       .json({ success: false, message: "Veritabanına kaydedilemedi." });
+  }
+});
+
+// === OTOMATİK ETKİNLİK SİLİCİ (CRON JOB) ===
+// Bu kod her gece saat tam 00:00'da tetiklenir ve tarihi geçmiş etkinlikleri çöpe atar.
+cron.schedule("0 0 * * *", async () => {
+  console.log("🧹 [CRON JOB] Günlük etkinlik temizlik rutini başlatıldı...");
+  try {
+    // real_date sütunundaki tarih dünden eskiyse o satırı siler
+    const result = await pool.query(
+      "DELETE FROM events WHERE real_date < CURRENT_DATE RETURNING *",
+    );
+    console.log(
+      `✅ [CRON JOB] Süresi dolan ${result.rowCount} etkinlik sistemden silindi.`,
+    );
+  } catch (err) {
+    console.error("🚨 [CRON JOB] Temizlik sırasında hata oluştu:", err.message);
   }
 });
 
