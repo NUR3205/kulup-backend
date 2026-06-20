@@ -671,30 +671,57 @@ app.get("/club-feedbacks/:clubName", async (req, res) => {
   }
 });
 
-// --- ETKİNLİĞE YILDIZ VER ---
-app.post("/rate-event", async (req, res) => {
+app.get("/check-user-rating/:eventId/:userId", async (req, res) => {
   try {
-    const { event_id, user_id, rating } = req.body;
-    const check = await pool.query(
-      "SELECT * FROM event_ratings WHERE event_id = $1 AND user_id = $2",
+    const { eventId, userId } = req.params;
+    const result = await pool.query(
+      "SELECT rating FROM event_ratings WHERE event_id = $1 AND user_id = $2",
+      [eventId, userId],
+    );
+
+    if (result.rows.length > 0) {
+      // Eğer oy vermişse, verdiği puanı gönderiyoruz
+      res.json({ hasRated: true, rating: result.rows[0].rating });
+    } else {
+      res.json({ hasRated: false, rating: 0 });
+    }
+  } catch (err) {
+    console.error("Oy kontrolü yapılamadı:", err);
+    res.status(500).json({ error: "Sunucu hatası" });
+  }
+});
+
+app.post("/rate-event", async (req, res) => {
+  const { event_id, user_id, rating } = req.body;
+
+  if (!event_id || !user_id || !rating) {
+    return res.status(400).send("Eksik veri gönderildi.");
+  }
+
+  try {
+    // Önce kontrol et: Bu kullanıcı bu etkinliğe daha önce oy vermiş mi?
+    const checkQuery = await pool.query(
+      "SELECT id FROM event_ratings WHERE event_id = $1 AND user_id = $2",
       [event_id, user_id],
     );
 
-    if (check.rows.length > 0) {
-      await pool.query(
-        "UPDATE event_ratings SET rating = $1 WHERE event_id = $2 AND user_id = $3",
-        [rating, event_id, user_id],
-      );
-    } else {
-      await pool.query(
-        "INSERT INTO event_ratings (event_id, user_id, rating) VALUES ($1, $2, $3)",
-        [event_id, user_id, rating],
-      );
+    if (checkQuery.rows.length > 0) {
+      // Daha önce oy verdiyse hata fırlat (Manipülasyonu engelle)
+      return res.status(403).json({ error: "Bu etkinliği zaten puanladınız." });
     }
-    res.status(200).send("Puan başarıyla kaydedildi.");
+
+    // İlk defa veriyorsa kaydet
+    await pool.query(
+      "INSERT INTO event_ratings (event_id, user_id, rating) VALUES ($1, $2, $3)",
+      [event_id, user_id, rating],
+    );
+
+    res
+      .status(200)
+      .json({ success: true, message: "Oyunuz başarıyla kaydedildi." });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Puan kaydedilirken hata oluştu.");
+    console.error("Puan kaydedilirken hata:", err);
+    res.status(500).send("Sunucu hatası.");
   }
 });
 
