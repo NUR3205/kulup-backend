@@ -160,6 +160,7 @@ app.post("/register", async (req, res) => {
     req.body;
 
   try {
+    // 1. E-Posta Kontrolü
     const userExists = await pool.query(
       "SELECT * FROM users WHERE email = $1",
       [email],
@@ -170,6 +171,20 @@ app.post("/register", async (req, res) => {
         .json({ message: "Bu e-posta adresiyle zaten bir hesap mevcut." });
     }
 
+    // 🌟 2. YENİ EKLENEN KISIM: TC Kimlik (Password) Benzersizlik Kontrolü
+    const tcExists = await pool.query(
+      "SELECT id FROM users WHERE password = $1",
+      [password],
+    );
+    if (tcExists.rows.length > 0) {
+      return res
+        .status(400)
+        .json({
+          message: "Bu TC Kimlik Numarası ile zaten bir kayıt bulunuyor!",
+        });
+    }
+
+    // 3. Her şey sorunsuzsa yeni kullanıcıyı ekle
     const newUser = await pool.query(
       "INSERT INTO users (name, email, password, role, club_email, auth_code, department) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
       [fullName, email, password, role, clubEmail, authCode, department],
@@ -1033,12 +1048,10 @@ app.post("/change-club-code", async (req, res) => {
       [new_code, user_id],
     );
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Kulüp yetki kodu başarıyla güncellendi.",
-      });
+    res.status(200).json({
+      success: true,
+      message: "Kulüp yetki kodu başarıyla güncellendi.",
+    });
   } catch (err) {
     console.error("Kulüp kodu güncellenirken hata oluştu:", err);
     res.status(500).json({ error: "Sunucu hatası yaşandı." });
