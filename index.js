@@ -1018,8 +1018,7 @@ app.get("/club-members-list/:clubName", async (req, res) => {
     res.status(500).json({ error: "Sunucu hatası: " + err.message });
   }
 });
-
-// 🔐 KULÜBÜN GİRİŞ ŞİFRESİNİ/KODUNU DEĞİŞTİRME ENDPOINT'İ
+// 🔐 KULÜP YETKİ KODUNU (AUTH CODE) DEĞİŞTİRME ENDPOINT'İ
 app.post("/change-club-code", async (req, res) => {
   const { user_id, new_code } = req.body;
 
@@ -1028,10 +1027,9 @@ app.post("/change-club-code", async (req, res) => {
   }
 
   try {
-    // users tablosundaki ilgili başkanın şifresini güncelliyoruz
-    // 💡 NOT: Veritabanındaki kolon adın 'password' yerine farklıysa (örn: 'club_code') aşağıyı ona göre düzenleyebilirsin bebeğim.
+    // 🌟 DÜZELTME: password yerine auth_code kolonunu güncelliyoruz!
     const result = await pool.query(
-      "UPDATE users SET password = $1 WHERE id = $2",
+      "UPDATE users SET auth_code = $1 WHERE id = $2",
       [new_code, user_id],
     );
 
@@ -1039,13 +1037,14 @@ app.post("/change-club-code", async (req, res) => {
       .status(200)
       .json({
         success: true,
-        message: "Kulüp kodu veritabanında başarıyla güncellendi.",
+        message: "Kulüp yetki kodu başarıyla güncellendi.",
       });
   } catch (err) {
     console.error("Kulüp kodu güncellenirken hata oluştu:", err);
     res.status(500).json({ error: "Sunucu hatası yaşandı." });
   }
 });
+
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
