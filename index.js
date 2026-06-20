@@ -1018,6 +1018,34 @@ app.get("/club-members-list/:clubName", async (req, res) => {
     res.status(500).json({ error: "Sunucu hatası: " + err.message });
   }
 });
+
+// 🔐 KULÜBÜN GİRİŞ ŞİFRESİNİ/KODUNU DEĞİŞTİRME ENDPOINT'İ
+app.post("/change-club-code", async (req, res) => {
+  const { user_id, new_code } = req.body;
+
+  if (!user_id || !new_code) {
+    return res.status(400).json({ error: "Eksik bilgi gönderildi." });
+  }
+
+  try {
+    // users tablosundaki ilgili başkanın şifresini güncelliyoruz
+    // 💡 NOT: Veritabanındaki kolon adın 'password' yerine farklıysa (örn: 'club_code') aşağıyı ona göre düzenleyebilirsin bebeğim.
+    const result = await pool.query(
+      "UPDATE users SET password = $1 WHERE id = $2",
+      [new_code, user_id],
+    );
+
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "Kulüp kodu veritabanında başarıyla güncellendi.",
+      });
+  } catch (err) {
+    console.error("Kulüp kodu güncellenirken hata oluştu:", err);
+    res.status(500).json({ error: "Sunucu hatası yaşandı." });
+  }
+});
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
