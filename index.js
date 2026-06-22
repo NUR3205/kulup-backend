@@ -71,15 +71,21 @@ app.post("/announcements", async (req, res) => {
     ]);
     const newAnnouncement = result.rows[0];
 
+    // 🚀 HARİKA DETAY: Bildirimleri ve mailleri beklemeden anında telefona "Başarılı" cevabı dönüyoruz ki uygulama hızlı aksın!
+    res.status(201).json(newAnnouncement);
+
+    // ==========================================
+    // ARKA PLAN İŞLEMLERİ (MAİL VE PUSH BİLDİRİM)
+    // ==========================================
+
     // 2. Sadece hocanın bölümündeki öğrencileri ve cihaz token'larını bul
     const studentQuery =
       "SELECT email, expo_push_token FROM users WHERE role = 'student' AND department = $1";
     const { rows: students } = await pool.query(studentQuery, [department]);
 
-    // Veritabanındaki gerçek öğrenci maillerini listele
     const studentEmails = students.map((u) => u.email).filter(Boolean);
 
-    // 3. BREVO HTTP API İLE GERÇEK E-POSTA GÖNDERİMİ
+    // 3. BREVO HTTP API İLE GERÇEK E-POSTA GÖNDERİMİ (Asenkron)
     if (studentEmails.length > 0) {
       const toAddresses = studentEmails.map((email) => ({ email: email }));
 
@@ -109,7 +115,7 @@ app.post("/announcements", async (req, res) => {
           `,
         }),
       })
-        .then((response) =>
+        .then(() =>
           console.log(
             `Brevo ile ${department} öğrencilerine mailler başarıyla fırlatıldı!`,
           ),
@@ -117,9 +123,10 @@ app.post("/announcements", async (req, res) => {
         .catch((err) => console.error("Brevo Mail Hatası:", err));
     }
 
-    // 4. Anlık Bildirim (Push Notification) Gönderimi
+    // 4. EXPO ANLIK BİLDİRİM (PUSH NOTIFICATION) GÖNDERİMİ (Asenkron)
     let messages = [];
     for (let student of students) {
+      // Token'ın boş olmadığını ve geçerli bir Expo formatında olduğunu kontrol ediyoruz
       if (
         student.expo_push_token &&
         Expo.isExpoPushToken(student.expo_push_token)
@@ -127,30 +134,37 @@ app.post("/announcements", async (req, res) => {
         messages.push({
           to: student.expo_push_token,
           sound: "default",
-          title: `📢 ${teacher_name} Yeni Duyuru Yayınladı!`,
+          title: is_important
+            ? `🚨 Acil: ${course_name}`
+            : `📢 ${teacher_name} Yeni Duyuru Yayınladı!`,
           body: title,
-          data: { route: "home" },
+          data: { route: "home", announcementId: newAnnouncement.id },
         });
       }
     }
 
     if (messages.length > 0) {
+      // Bildirimleri paketle (Chunking - Sunucuyu yormamak için)
       let chunks = expo.chunkPushNotifications(messages);
+
+      // Asenkron döngü ile paketleri ateşle
       (async () => {
         for (let chunk of chunks) {
           try {
             await expo.sendPushNotificationsAsync(chunk);
+            console.log("Expo Push Bildirimleri başarıyla fırlatıldı!");
           } catch (error) {
             console.error("Expo Push Hatası:", error);
           }
         }
       })();
     }
-
-    res.status(201).json(newAnnouncement);
   } catch (err) {
     console.error("Duyuru eklenirken kritik hata:", err);
-    res.status(500).send("Duyuru yayınlanamadı.");
+    // Eğer cevap daha önce gönderilmediyse (veritabanı çökmesi vs.) hata dön
+    if (!res.headersSent) {
+      res.status(500).send("Duyuru yayınlanamadı.");
+    }
   }
 });
 
@@ -177,11 +191,9 @@ app.post("/register", async (req, res) => {
       [password],
     );
     if (tcExists.rows.length > 0) {
-      return res
-        .status(400)
-        .json({
-          message: "Bu TC Kimlik Numarası ile zaten bir kayıt bulunuyor!",
-        });
+      return res.status(400).json({
+        message: "Bu TC Kimlik Numarası ile zaten bir kayıt bulunuyor!",
+      });
     }
 
     // 3. Her şey sorunsuzsa yeni kullanıcıyı ekle
