@@ -53,6 +53,8 @@ app.post("/announcements", async (req, res) => {
     course_name,
   } = req.body;
 
+  console.log("==> Yeni duyuru isteği geldi! Bölüm:", department);
+
   try {
     // 1. Duyuruyu Veritabanına Kaydet
     const insertQuery = `
@@ -70,25 +72,25 @@ app.post("/announcements", async (req, res) => {
       course_name,
     ]);
     const newAnnouncement = result.rows[0];
-
-    // 🚀 HARİKA DETAY: Bildirimleri ve mailleri beklemeden anında telefona "Başarılı" cevabı dönüyoruz ki uygulama hızlı aksın!
-    res.status(201).json(newAnnouncement);
-
-    // ==========================================
-    // ARKA PLAN İŞLEMLERİ (MAİL VE PUSH BİLDİRİM)
-    // ==========================================
+    console.log(
+      "1. Duyuru veritabanına başarıyla yazıldı. ID:",
+      newAnnouncement.id,
+    );
 
     // 2. Sadece hocanın bölümündeki öğrencileri ve cihaz token'larını bul
     const studentQuery =
       "SELECT email, expo_push_token FROM users WHERE role = 'student' AND department = $1";
     const { rows: students } = await pool.query(studentQuery, [department]);
+    console.log(`2. Bölümde toplam ${students.length} öğrenci bulundu.`);
 
     const studentEmails = students.map((u) => u.email).filter(Boolean);
 
-    // 3. BREVO HTTP API İLE GERÇEK E-POSTA GÖNDERİMİ (Asenkron)
+    // 3. BREVO HTTP API İLE GERÇEK E-POSTA GÖNDERİMİ
     if (studentEmails.length > 0) {
       const toAddresses = studentEmails.map((email) => ({ email: email }));
+      console.log("3. Mailler Brevo'ya gönderiliyor...");
 
+      // Mail gönderme işlemini await etmiyoruz arkayı tıkamasın diye
       fetch("https://api.brevo.com/v3/smtp/email", {
         method: "POST",
         headers: {
@@ -115,22 +117,21 @@ app.post("/announcements", async (req, res) => {
           `,
         }),
       })
-        .then(() =>
-          console.log(
-            `Brevo ile ${department} öğrencilerine mailler başarıyla fırlatıldı!`,
-          ),
-        )
-        .catch((err) => console.error("Brevo Mail Hatası:", err));
+        .then(() => console.log("-> Brevo e-postaları başarıyla fırlatıldı!"))
+        .catch((err) => console.error("-> Brevo Mail Hatası:", err));
     }
 
-    // 4. EXPO ANLIK BİLDİRİM (PUSH NOTIFICATION) GÖNDERİMİ (Asenkron)
+    // 4. EXPO ANLIK BİLDİRİM (PUSH NOTIFICATION) GÖNDERİMİ
     let messages = [];
     for (let student of students) {
-      // Token'ın boş olmadığını ve geçerli bir Expo formatında olduğunu kontrol ediyoruz
       if (
         student.expo_push_token &&
         Expo.isExpoPushToken(student.expo_push_token)
       ) {
+        console.log(
+          "-> Geçerli Token Bulundu, listeye ekleniyor:",
+          student.expo_push_token,
+        );
         messages.push({
           to: student.expo_push_token,
           sound: "default",
@@ -140,28 +141,43 @@ app.post("/announcements", async (req, res) => {
           body: title,
           data: { route: "home", announcementId: newAnnouncement.id },
         });
+      } else {
+        console.log(
+          `-> Öğrencinin tokenı yok veya geçersiz. Token: ${student.expo_push_token}`,
+        );
       }
     }
 
     if (messages.length > 0) {
-      // Bildirimleri paketle (Chunking - Sunucuyu yormamak için)
+      console.log(
+        `4. Toplam ${messages.length} adet bildirim paketi hazırlanıyor (Chunking)...`,
+      );
       let chunks = expo.chunkPushNotifications(messages);
 
-      // Asenkron döngü ile paketleri ateşle
-      (async () => {
-        for (let chunk of chunks) {
-          try {
-            await expo.sendPushNotificationsAsync(chunk);
-            console.log("Expo Push Bildirimleri başarıyla fırlatıldı!");
-          } catch (error) {
-            console.error("Expo Push Hatası:", error);
-          }
+      // GÜVENLİ ADIM: Sunucu bildirimi göndermeden işlemi bitirmesin diye AWAIT koyuyoruz!
+      for (let chunk of chunks) {
+        try {
+          console.log("-> Expo sunucularına push paketi ateşleniyor...");
+          const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+          console.log(
+            "-> Expo Bildirim biletleri başarıyla alındı:",
+            ticketChunk,
+          );
+        } catch (error) {
+          console.error("-> Expo Push Gönderim Döngüsü Hatası:", error);
         }
-      })();
+      }
+    } else {
+      console.log("4. Gönderilecek hiçbir geçerli push token bulunamadı!");
     }
+
+    // 5. HER ŞEY KUSURSUZCA BİTTİKTEN SONRA EN SONDA YANITI DÖNÜYORUZ 👍
+    console.log(
+      "==> Tüm işlemler tamamlandı, frontend'e başarı yanıtı dönülüyor.",
+    );
+    res.status(201).json(newAnnouncement);
   } catch (err) {
-    console.error("Duyuru eklenirken kritik hata:", err);
-    // Eğer cevap daha önce gönderilmediyse (veritabanı çökmesi vs.) hata dön
+    console.error("Duyuru eklenirken KRİTİK HATA oluştu:", err);
     if (!res.headersSent) {
       res.status(500).send("Duyuru yayınlanamadı.");
     }
