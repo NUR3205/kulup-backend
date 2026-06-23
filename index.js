@@ -22,21 +22,49 @@ const pool = new Pool({
 // 3. EXPO BİLDİRİM KURULUMU
 let expo = new Expo();
 
-// --- TOKEN KAYDETME ENDPOINT'İ ---
+// --- ZIRHLI TOKEN KAYDETME ENDPOINT'İ (TEK VE GÜVENLİ KAPI) ---
 app.post("/save-token", async (req, res) => {
-  const { userId, token } = req.body;
-  if (!userId || !token) return res.status(400).send("Geçersiz veri");
+  // Hem eski (userId, token) hem de yeni (email, expo_push_token) yapıyı destekler
+  const { email, expo_push_token, userId, token } = req.body;
+  const finalToken = expo_push_token || token;
+
+  if (!finalToken) {
+    return res.status(400).json({ error: "Token eksik gönderildi!" });
+  }
 
   try {
-    const query = "UPDATE users SET expo_push_token = $1 WHERE id = $2";
-    await pool.query(query, [token, userId]);
-    res.json({
-      success: true,
-      message: "Cihaz bildirimi için Token kaydedildi.",
-    });
+    let result;
+    if (email) {
+      result = await pool.query(
+        "UPDATE users SET expo_push_token = $1 WHERE email = $2 RETURNING *",
+        [finalToken, email],
+      );
+    } else if (userId) {
+      result = await pool.query(
+        "UPDATE users SET expo_push_token = $1 WHERE id = $2 RETURNING *",
+        [finalToken, userId],
+      );
+    } else {
+      return res
+        .status(400)
+        .json({ error: "Kullanıcı bilgisi (email veya ID) eksik!" });
+    }
+
+    if (result && result.rowCount > 0) {
+      console.log(
+        `✅ [TOKEN BAŞARILI] Token veritabanına mühürlendi: ${finalToken}`,
+      );
+      res
+        .status(200)
+        .json({ message: "Token başarıyla güncellendi.", success: true });
+    } else {
+      res
+        .status(404)
+        .json({ error: "Veritabanında böyle bir kullanıcı bulunamadı." });
+    }
   } catch (err) {
-    console.error("Token kaydetme hatası:", err);
-    res.status(500).json({ error: "Sunucu hatası" });
+    console.error("❌ Token kaydetme hatası:", err);
+    res.status(500).json({ error: "Sunucu hatası yaşandı." });
   }
 });
 
@@ -325,9 +353,6 @@ app.post("/update-club-code", async (req, res) => {
   }
 });
 
-// En üste diğer require'ların yanına bunu eklemeyi unutma:
-// const cron = require("node-cron");
-
 // --- YENİ ETKİNLİK EKLE (OTOMATİK SİLİNME TARİHİ İLE) ---
 app.post("/events", async (req, res) => {
   console.log("--- YENİ ETKİNLİK İSTEĞİ GELDİ ---");
@@ -339,7 +364,7 @@ app.post("/events", async (req, res) => {
       preview_text,
       detailed_content,
       image_url,
-      real_date, // Frontenden gelen gerçek zaman damgası
+      real_date,
     } = req.body;
 
     if (!title) {
@@ -380,11 +405,9 @@ app.post("/events", async (req, res) => {
 });
 
 // === OTOMATİK ETKİNLİK SİLİCİ (CRON JOB) ===
-// Bu kod her gece saat tam 00:00'da tetiklenir ve tarihi geçmiş etkinlikleri çöpe atar.
 cron.schedule("0 0 * * *", async () => {
   console.log("🧹 [CRON JOB] Günlük etkinlik temizlik rutini başlatıldı...");
   try {
-    // real_date sütunundaki tarih dünden eskiyse o satırı siler
     const result = await pool.query(
       "DELETE FROM events WHERE real_date < CURRENT_DATE RETURNING *",
     );
@@ -655,7 +678,6 @@ app.post("/reply-feedback", async (req, res) => {
     // 🌟 YENİ: ÖĞRENCİYE ANLIK BİLDİRİM (PUSH NOTIFICATION) FIRLATMA 🌟
     if (updatedFeedback.user_id) {
       try {
-        // Öğrencinin cihaz token'ını bul
         const userRes = await pool.query(
           "SELECT expo_push_token FROM users WHERE id::text = $1::text",
           [updatedFeedback.user_id],
@@ -665,12 +687,10 @@ app.post("/reply-feedback", async (req, res) => {
           const token = userRes.rows[0].expo_push_token;
 
           if (Expo.isExpoPushToken(token)) {
-            // Hoca mı cevap verdi başkan mı, onu ayırt et
             const senderName = updatedFeedback.club_name.startsWith("TEACHER_")
               ? "Bölüm Hocanız"
               : "Kulüp Başkanı";
 
-            // Expo ile telefonu titret!
             await expo.sendPushNotificationsAsync([
               {
                 to: token,
@@ -723,7 +743,6 @@ app.get("/check-user-rating/:eventId/:userId", async (req, res) => {
     );
 
     if (result.rows.length > 0) {
-      // Eğer oy vermişse, verdiği puanı gönderiyoruz
       res.json({ hasRated: true, rating: result.rows[0].rating });
     } else {
       res.json({ hasRated: false, rating: 0 });
@@ -742,18 +761,15 @@ app.post("/rate-event", async (req, res) => {
   }
 
   try {
-    // Önce kontrol et: Bu kullanıcı bu etkinliğe daha önce oy vermiş mi?
     const checkQuery = await pool.query(
       "SELECT id FROM event_ratings WHERE event_id = $1 AND user_id = $2",
       [event_id, user_id],
     );
 
     if (checkQuery.rows.length > 0) {
-      // Daha önce oy verdiyse hata fırlat (Manipülasyonu engelle)
       return res.status(403).json({ error: "Bu etkinliği zaten puanladınız." });
     }
 
-    // İlk defa veriyorsa kaydet
     await pool.query(
       "INSERT INTO event_ratings (event_id, user_id, rating) VALUES ($1, $2, $3)",
       [event_id, user_id, rating],
@@ -992,7 +1008,6 @@ app.get("/teacher-students", async (req, res) => {
   }
 
   try {
-    // DÜZELTME: created_at sütunu silindi, sadece var olan sütunlar çekiliyor
     const query = `
       SELECT id, name, email, department 
       FROM users 
@@ -1014,7 +1029,6 @@ app.get("/teacher-students", async (req, res) => {
 // --- ÖĞRENCİNİN KENDİ MESAJLARINI VE GELEN CEVAPLARI GÖRMESİ (ZIRHLI) ---
 app.get("/student-feedbacks/:userId", async (req, res) => {
   try {
-    // Tip uyuşmazlığını engellemek için ::text eklendi
     const result = await pool.query(
       "SELECT * FROM feedbacks WHERE user_id::text = $1::text ORDER BY created_at DESC",
       [req.params.userId],
@@ -1043,7 +1057,6 @@ app.get("/club-member-count/:clubName", async (req, res) => {
 // --- KULÜBÜN KAYITLI ÜYELERİNİ GETİR (SÜTUN ADI DÜZELTİLDİ) ---
 app.get("/club-members-list/:clubName", async (req, res) => {
   try {
-    // DİKKAT: u.id yerine u.user_id kullanıldı çünkü veritabanındaki sütun adı bu!
     const query = `
       SELECT 
         cm.user_id, 
@@ -1061,6 +1074,7 @@ app.get("/club-members-list/:clubName", async (req, res) => {
     res.status(500).json({ error: "Sunucu hatası: " + err.message });
   }
 });
+
 // 🔐 KULÜP YETKİ KODUNU (AUTH CODE) DEĞİŞTİRME ENDPOINT'İ
 app.post("/change-club-code", async (req, res) => {
   const { user_id, new_code } = req.body;
@@ -1070,7 +1084,6 @@ app.post("/change-club-code", async (req, res) => {
   }
 
   try {
-    // 🌟 DÜZELTME: password yerine auth_code kolonunu güncelliyoruz!
     const result = await pool.query(
       "UPDATE users SET auth_code = $1 WHERE id = $2",
       [new_code, user_id],
@@ -1083,33 +1096,6 @@ app.post("/change-club-code", async (req, res) => {
   } catch (err) {
     console.error("Kulüp kodu güncellenirken hata oluştu:", err);
     res.status(500).json({ error: "Sunucu hatası yaşandı." });
-  }
-});
-
-// --- KULLANICI GİRİŞ YAPTIĞINDA CİHAZ TOKEN'INI VERİTABANINA KAYDET ---
-app.post("/save-token", async (req, res) => {
-  const { email, expo_push_token } = req.body;
-
-  if (!email || !expo_push_token) {
-    return res.status(400).json({ error: "Email veya Token eksik!" });
-  }
-
-  try {
-    const updateQuery =
-      "UPDATE users SET expo_push_token = $1 WHERE email = $2 RETURNING *";
-    const result = await pool.query(updateQuery, [expo_push_token, email]);
-
-    if (result.rowCount > 0) {
-      console.log(
-        `✅ [TOKEN BAŞARILI] ${email} adresine yeni token mühürlendi!`,
-      );
-      res.status(200).json({ message: "Token başarıyla güncellendi." });
-    } else {
-      res.status(404).json({ error: "Kullanıcı bulunamadı." });
-    }
-  } catch (err) {
-    console.error("❌ Token kaydedilirken hata oluştu:", err);
-    res.status(500).json({ error: "Sunucu hatası." });
   }
 });
 
