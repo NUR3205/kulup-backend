@@ -353,7 +353,7 @@ app.post("/update-club-code", async (req, res) => {
   }
 });
 
-// --- YENİ ETKİNLİK EKLE (OTOMATİK SİLİNME TARİHİ VE BİLDİRİM İLE) ---
+// --- YENİ ETKİNLİK EKLE (OTOMATİK SİLİNME TARİHİ VE KUSURSUZ BİLDİRİM İLE) ---
 app.post("/events", async (req, res) => {
   console.log("--- YENİ ETKİNLİK İSTEĞİ GELDİ ---");
   try {
@@ -378,7 +378,7 @@ app.post("/events", async (req, res) => {
       `ALTER TABLE events ADD COLUMN IF NOT EXISTS real_date TIMESTAMP;`,
     );
 
-    // 2. Veriyi gerçek tarihiyle birlikte kaydet (RETURNING * ile yeni id'yi alıyoruz)
+    // 2. Veriyi gerçek tarihiyle birlikte kaydet
     const insertQuery =
       "INSERT INTO events (title, date, preview_text, detailed_content, club_name, image_url, real_date) VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING *";
     const result = await pool.query(insertQuery, [
@@ -394,16 +394,24 @@ app.post("/events", async (req, res) => {
 
     console.log("Başarılı: Etkinlik Neon'a kaydedildi!");
 
-    // 🌟 3. YENİ: TÜM ÖĞRENCİLERE ETKİNLİK BİLDİRİMİ FIRLATMA 🌟
-    const { rows: students } = await pool.query(
-      "SELECT expo_push_token FROM users WHERE role = 'student' AND expo_push_token IS NOT NULL",
-    );
+    // 🌟 3. YENİ VE KUSURSUZ: ETKİNLİĞİ YAYINLAYAN KULÜP HARİÇ TÜM ÖĞRENCİ VE BAŞKANLARA BİLDİRİM 🌟
+    // LEFT JOIN ile kişinin kulübüne bakıyoruz.
+    // Öğrenciyse (kulübü yoksa) VEYA başkan olup kulübü BU ETKİNLİĞİN kulübü DEĞİLSE bildirim atıyoruz!
+    const tokenQuery = `
+      SELECT u.expo_push_token 
+      FROM users u 
+      LEFT JOIN clubs c ON u.auth_code = c.auth_code 
+      WHERE u.expo_push_token IS NOT NULL 
+        AND u.role IN ('student', 'president') 
+        AND (c.club_name IS NULL OR c.club_name != $1)
+    `;
+    const { rows: usersToNotify } = await pool.query(tokenQuery, [club_name]);
 
     let messages = [];
-    for (let student of students) {
-      if (Expo.isExpoPushToken(student.expo_push_token)) {
+    for (let user of usersToNotify) {
+      if (Expo.isExpoPushToken(user.expo_push_token)) {
         messages.push({
-          to: student.expo_push_token,
+          to: user.expo_push_token,
           sound: "default",
           title: `🎉 Yeni Etkinlik: ${club_name}`,
           body: title,
