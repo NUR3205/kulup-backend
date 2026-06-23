@@ -353,7 +353,7 @@ app.post("/update-club-code", async (req, res) => {
   }
 });
 
-// --- YENİ ETKİNLİK EKLE (OTOMATİK SİLİNME TARİHİ İLE) ---
+// --- YENİ ETKİNLİK EKLE (OTOMATİK SİLİNME TARİHİ VE BİLDİRİM İLE) ---
 app.post("/events", async (req, res) => {
   console.log("--- YENİ ETKİNLİK İSTEĞİ GELDİ ---");
   try {
@@ -373,26 +373,63 @@ app.post("/events", async (req, res) => {
         .json({ success: false, message: "Başlık verisi ulaşmadı." });
     }
 
-    // 1. GÜVENLİK: Tabloda real_date sütunu yoksa anında oluşturur (Çökmeyi engeller)
+    // 1. GÜVENLİK: Tabloda real_date sütunu yoksa anında oluşturur
     await pool.query(
       `ALTER TABLE events ADD COLUMN IF NOT EXISTS real_date TIMESTAMP;`,
     );
 
-    // 2. Veriyi gerçek tarihiyle birlikte kaydet
-    await pool.query(
-      "INSERT INTO events (title, date, preview_text, detailed_content, club_name, image_url, real_date) VALUES($1, $2, $3, $4, $5, $6, $7)",
-      [
-        title,
-        date,
-        preview_text,
-        detailed_content,
-        club_name,
-        image_url,
-        real_date,
-      ],
-    );
+    // 2. Veriyi gerçek tarihiyle birlikte kaydet (RETURNING * ile yeni id'yi alıyoruz)
+    const insertQuery =
+      "INSERT INTO events (title, date, preview_text, detailed_content, club_name, image_url, real_date) VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING *";
+    const result = await pool.query(insertQuery, [
+      title,
+      date,
+      preview_text,
+      detailed_content,
+      club_name,
+      image_url,
+      real_date,
+    ]);
+    const newEvent = result.rows[0];
 
     console.log("Başarılı: Etkinlik Neon'a kaydedildi!");
+
+    // 🌟 3. YENİ: TÜM ÖĞRENCİLERE ETKİNLİK BİLDİRİMİ FIRLATMA 🌟
+    const { rows: students } = await pool.query(
+      "SELECT expo_push_token FROM users WHERE role = 'student' AND expo_push_token IS NOT NULL",
+    );
+
+    let messages = [];
+    for (let student of students) {
+      if (Expo.isExpoPushToken(student.expo_push_token)) {
+        messages.push({
+          to: student.expo_push_token,
+          sound: "default",
+          title: `🎉 Yeni Etkinlik: ${club_name}`,
+          body: title,
+          data: { route: "home", eventId: newEvent.id },
+        });
+      }
+    }
+
+    if (messages.length > 0) {
+      console.log(
+        `-> Etkinlik için ${messages.length} cihaza bildirim gönderiliyor...`,
+      );
+      let chunks = expo.chunkPushNotifications(messages);
+      for (let chunk of chunks) {
+        try {
+          await expo.sendPushNotificationsAsync(chunk);
+        } catch (error) {
+          console.error("Etkinlik bildirim hatası:", error);
+        }
+      }
+      console.log("✅ Etkinlik bildirimleri başarıyla fırlatıldı!");
+    } else {
+      console.log("-> Bildirim atılacak geçerli cihaz bulunamadı.");
+    }
+    // -----------------------------------------------------------------
+
     res
       .status(200)
       .json({ success: true, message: "Etkinlik başarıyla yayınlandı!" });
@@ -401,21 +438,6 @@ app.post("/events", async (req, res) => {
     res
       .status(500)
       .json({ success: false, message: "Veritabanına kaydedilemedi." });
-  }
-});
-
-// === OTOMATİK ETKİNLİK SİLİCİ (CRON JOB) ===
-cron.schedule("0 0 * * *", async () => {
-  console.log("🧹 [CRON JOB] Günlük etkinlik temizlik rutini başlatıldı...");
-  try {
-    const result = await pool.query(
-      "DELETE FROM events WHERE real_date < CURRENT_DATE RETURNING *",
-    );
-    console.log(
-      `✅ [CRON JOB] Süresi dolan ${result.rowCount} etkinlik sistemden silindi.`,
-    );
-  } catch (err) {
-    console.error("🚨 [CRON JOB] Temizlik sırasında hata oluştu:", err.message);
   }
 });
 
