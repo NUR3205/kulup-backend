@@ -68,6 +68,33 @@ app.post("/save-token", async (req, res) => {
   }
 });
 
+// --- BİLDİRİMLERİ KAPAT (TOKEN SİL) ---
+app.post("/delete-token", async (req, res) => {
+  const { userId, email } = req.body;
+
+  try {
+    if (email) {
+      await pool.query(
+        "UPDATE users SET expo_push_token = NULL WHERE email = $1",
+        [email],
+      );
+    } else if (userId) {
+      await pool.query(
+        "UPDATE users SET expo_push_token = NULL WHERE id = $1",
+        [userId],
+      );
+    } else {
+      return res.status(400).json({ error: "Kullanıcı bilgisi eksik!" });
+    }
+
+    console.log(`🔇 [BİLDİRİM KAPATILDI] ${email || userId} token'ı silindi.`);
+    res.status(200).json({ message: "Bildirimler başarıyla kapatıldı." });
+  } catch (err) {
+    console.error("Token silme hatası:", err);
+    res.status(500).json({ error: "Sunucu hatası" });
+  }
+});
+
 // --- DUYURU YAYINLA, BİLDİRİM VE GERÇEK E-POSTA GÖNDER (BREVO API) ---
 app.post("/announcements", async (req, res) => {
   const {
