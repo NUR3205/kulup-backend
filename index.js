@@ -1086,6 +1086,33 @@ app.post("/change-club-code", async (req, res) => {
   }
 });
 
+// --- KULLANICI GİRİŞ YAPTIĞINDA CİHAZ TOKEN'INI VERİTABANINA KAYDET ---
+app.post("/save-token", async (req, res) => {
+  const { email, expo_push_token } = req.body;
+
+  if (!email || !expo_push_token) {
+    return res.status(400).json({ error: "Email veya Token eksik!" });
+  }
+
+  try {
+    const updateQuery =
+      "UPDATE users SET expo_push_token = $1 WHERE email = $2 RETURNING *";
+    const result = await pool.query(updateQuery, [expo_push_token, email]);
+
+    if (result.rowCount > 0) {
+      console.log(
+        `✅ [TOKEN BAŞARILI] ${email} adresine yeni token mühürlendi!`,
+      );
+      res.status(200).json({ message: "Token başarıyla güncellendi." });
+    } else {
+      res.status(404).json({ error: "Kullanıcı bulunamadı." });
+    }
+  } catch (err) {
+    console.error("❌ Token kaydedilirken hata oluştu:", err);
+    res.status(500).json({ error: "Sunucu hatası." });
+  }
+});
+
 // SUNUCUYU BAŞLAT
 const PORT = 5000;
 app.listen(PORT, () =>
